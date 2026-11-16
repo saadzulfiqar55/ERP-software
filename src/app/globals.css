@@ -1,0 +1,172 @@
+@import "tailwindcss";
+
+:root {
+  --space-indigo: #2b2d42;
+  --space-indigo-muted: #4a4e69;
+  --lavender-grey: #8d99ae;
+  --border-crisp: #d4dce4;
+  --platinum: #edf2f4;
+  --punch-red: #ef233c;
+  --classic-crimson: #d80032;
+  --font-poppins: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono-stack: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html {
+    font-size: 16px;
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--platinum);
+    color: var(--space-indigo);
+    font-family: var(--font-poppins);
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+  }
+
+  .font-mono,
+  input[type="number"],
+  table td,
+  table th {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Global pointer cursor & smooth transitions on all interactive controls */
+  button,
+  select,
+  a,
+  summary,
+  [role="button"],
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  input[type="file"],
+  label {
+    cursor: pointer;
+    transition: all 240ms var(--ease-fluid);
+  }
+
+  button:disabled,
+  input:disabled,
+  select:disabled {
+    cursor: not-allowed;
+  }
+
+  input,
+  select {
+    font-family: inherit;
+    transition: border-color 220ms var(--ease-fluid), box-shadow 220ms var(--ease-fluid), background-color 220ms var(--ease-fluid);
+  }
+
+  input:focus,
+  select:focus {
+    box-shadow: 0 0 0 3px rgba(239, 35, 60, 0.12);
+  }
+}
+
+/* Standard Elevated Container Card */
+.pos-card {
+  background: #ffffff;
+  border: 1px solid #d4dce4;
+  box-shadow: 0 2px 6px rgba(43, 45, 66, 0.04);
+  transition: box-shadow 280ms var(--ease-fluid), border-color 280ms var(--ease-fluid);
+}
+
+/* Interactive Menu Item Card with Animated Top Accent Bar & Ambient Elevation */
+.pos-menu-card {
+  position: relative;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #d4dce4;
+  box-shadow: 0 2px 6px rgba(43, 45, 66, 0.04);
+  cursor: pointer;
+  transition:
+    box-shadow 340ms var(--ease-fluid),
+    border-color 340ms var(--ease-fluid),
+    background-color 340ms var(--ease-fluid);
+}
+
+.pos-menu-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #ef233c 0%, #d80032 50%, #2b2d42 100%);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 360ms var(--ease-fluid);
+  z-index: 20;
+}
+
+.pos-menu-card:hover {
+  border-color: rgba(239, 35, 60, 0.45);
+  background: linear-gradient(180deg, #ffffff 0%, #fcfdfe 100%);
+  box-shadow:
+    0 16px 32px -8px rgba(43, 45, 66, 0.12),
+    0 6px 16px -4px rgba(239, 35, 60, 0.1);
+}
+
+.pos-menu-card:hover::before {
+  transform: scaleX(1);
+}
+
+/* Smooth Tab / Section Entrance Animation */
+@keyframes panelEnter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-panel {
+  animation: panelEnter 280ms var(--ease-fluid) forwards;
+}
+
+/* Clean Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+::-webkit-scrollbar-thumb {
+  background: #8d99ae;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2b2d42;
+}
+
+/* 80mm Thermal Receipt Print Styles */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-receipt,
+  #printable-receipt * {
+    visibility: visible;
+  }
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    background: #ffffff !important;
+    color: #000000 !important;
+    padding: 4mm;
+    font-family: "Courier New", Courier, monospace;
+    box-shadow: none !important;
+    border: none !important;
+  }
+}

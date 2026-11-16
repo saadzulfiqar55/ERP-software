@@ -1,0 +1,39 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Next.js build output
+/.next/
+/out/
+/build
+
+# Runtime local database & active session store
+/data/
+
+# Environment variables
+.env
+.env*.local
+
+# TypeScript & Next generated files
+*.tsbuildinfo
+next-env.d.ts
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# OS / Editor files
+.DS_Store
+*.pem
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea
