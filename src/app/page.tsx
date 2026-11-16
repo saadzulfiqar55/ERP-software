@@ -16,6 +16,7 @@ import {
   LayoutGrid,
   LogOut,
   Package,
+  Pencil,
   Printer,
   Receipt,
   RefreshCw,
@@ -24,6 +25,7 @@ import {
   ShieldCheck,
   ShoppingBag,
   Trash2,
+  X,
 } from "lucide-react";
 import {
   ActiveSession,
@@ -209,13 +211,22 @@ export default function AlbarkaModernPOS() {
   const [voucherDesc, setVoucherDesc] = useState<string>("");
   const [voucherMode] = useState<"CASH" | "BANK_TRANSFER" | "CARD">("CASH");
 
-  // New Party Form
+  // New / Edit Party Form
+  const [editingPartyId, setEditingPartyId] = useState<string | null>(null);
   const [newPartyName, setNewPartyName] = useState<string>("");
   const [newPartyType, setNewPartyType] = useState<PartyType>("CUSTOMER");
   const [newPartyPhone, setNewPartyPhone] = useState<string>("");
   const [newPartyOpening, setNewPartyOpening] = useState<string>("0");
 
-  // New Product Form (including Image Upload / URL)
+  // Edit Ledger Voucher Entry State
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editEntryVoucherNo, setEditEntryVoucherNo] = useState<string>("");
+  const [editEntryDesc, setEditEntryDesc] = useState<string>("");
+  const [editEntryDebit, setEditEntryDebit] = useState<string>("0");
+  const [editEntryCredit, setEditEntryCredit] = useState<string>("0");
+
+  // New / Edit Product Form (including Image Upload / URL)
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [newProdName, setNewProdName] = useState<string>("");
   const [newProdCode, setNewProdCode] = useState<string>("");
   const [newProdSegment, setNewProdSegment] = useState<BusinessSegment>("RESTAURANT");
@@ -546,6 +557,38 @@ export default function AlbarkaModernPOS() {
   async function handleCreateParty(e: React.FormEvent) {
     e.preventDefault();
     if (!newPartyName.trim()) return;
+
+    if (editingPartyId) {
+      const existing = parties.find((p) => p.id === editingPartyId);
+      if (!existing) return;
+      const updatedParty: PartyAccount = {
+        ...existing,
+        name: newPartyName.trim(),
+        type: newPartyType,
+        phone: newPartyPhone.trim() || "-",
+        currentBalance: Number(newPartyOpening) || 0,
+      };
+      const res = await fetch("/api/ledger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "EDIT_PARTY",
+          party: updatedParty,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setParties(data.db.parties);
+        setLedger(data.db.ledger);
+        setEditingPartyId(null);
+        setNewPartyName("");
+        setNewPartyPhone("");
+        setNewPartyOpening("0");
+        notifySaved(`Updated Khata account "${updatedParty.name}".`);
+      }
+      return;
+    }
+
     const res = await fetch("/api/ledger", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -566,6 +609,89 @@ export default function AlbarkaModernPOS() {
       setNewPartyPhone("");
       setNewPartyOpening("0");
       notifySaved(`Khata account "${data.party.name}" created.`);
+    }
+  }
+
+  function startEditingParty(party: PartyAccount) {
+    setEditingPartyId(party.id);
+    setNewPartyName(party.name);
+    setNewPartyType(party.type);
+    setNewPartyPhone(party.phone === "-" ? "" : party.phone);
+    setNewPartyOpening(String(party.currentBalance));
+  }
+
+  function cancelEditingParty() {
+    setEditingPartyId(null);
+    setNewPartyName("");
+    setNewPartyPhone("");
+    setNewPartyOpening("0");
+  }
+
+  async function handleDeleteParty(partyId: string, partyName: string) {
+    const res = await fetch("/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "DELETE_PARTY",
+        partyId,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setParties(data.db.parties);
+      setLedger(data.db.ledger);
+      if (editingPartyId === partyId) cancelEditingParty();
+      notifySaved(`Deleted Khata account "${partyName}".`);
+    }
+  }
+
+  function startEditingEntry(entry: LedgerEntry) {
+    setEditingEntryId(entry.id);
+    setEditEntryVoucherNo(entry.voucherNo);
+    setEditEntryDesc(entry.description);
+    setEditEntryDebit(String(entry.debit));
+    setEditEntryCredit(String(entry.credit));
+  }
+
+  async function handleSaveEditedEntry(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingEntryId) return;
+    const res = await fetch("/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "EDIT_ENTRY",
+        entryId: editingEntryId,
+        voucherNo: editEntryVoucherNo.trim(),
+        description: editEntryDesc.trim(),
+        debit: Number(editEntryDebit) || 0,
+        credit: Number(editEntryCredit) || 0,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setParties(data.db.parties);
+      setLedger(data.db.ledger);
+      setEditingEntryId(null);
+      notifySaved("Ledger voucher updated and party balance recalculated.");
+    }
+  }
+
+  async function handleDeleteEntry(entryId: string, voucherNo: string) {
+    const res = await fetch("/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "DELETE_ENTRY",
+        entryId,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setParties(data.db.parties);
+      setLedger(data.db.ledger);
+      if (editingEntryId === entryId) setEditingEntryId(null);
+      notifySaved(`Deleted voucher ${voucherNo} and adjusted balance.`);
     }
   }
 
@@ -604,6 +730,64 @@ export default function AlbarkaModernPOS() {
   async function handleAddProduct(e: React.FormEvent) {
     e.preventDefault();
     if (!newProdName.trim() || !newProdPrice) return;
+
+    if (editingProductId) {
+      const existing = products.find((p) => p.id === editingProductId);
+      if (!existing) return;
+      const updatedProduct: Product = {
+        ...existing,
+        code: newProdCode.trim() || existing.code,
+        name: newProdName.trim(),
+        segment: newProdSegment,
+        category: newProdCategory,
+        kitchenStation:
+          newProdSegment === "RETAIL"
+            ? "SWEET_RETAIL"
+            : newProdCategory.includes("BBQ")
+            ? "BBQ_GRILL"
+            : newProdCategory.includes("Tandoor")
+            ? "TANDOOR"
+            : newProdCategory.includes("Rice")
+            ? "RICE_PULAO"
+            : "KARAHI_HANDI",
+        taxMode: newProdSegment === "RETAIL" ? "INCLUSIVE" : "EXCLUSIVE",
+        stockQty: Number(newProdStock) || 0,
+        imageUrl: newProdImageUrl.trim() || undefined,
+        variants:
+          existing.variants.length > 0
+            ? existing.variants.map((v, idx) =>
+                idx === 0
+                  ? {
+                      ...v,
+                      price: Number(newProdPrice),
+                      costPrice: Math.round(Number(newProdPrice) * 0.6),
+                    }
+                  : v
+              )
+            : [
+                {
+                  id: `v-${Date.now()}`,
+                  name: newProdSegment === "RETAIL" ? "Standard Pack" : "Full Portion",
+                  price: Number(newProdPrice),
+                  costPrice: Math.round(Number(newProdPrice) * 0.6),
+                },
+              ],
+      };
+
+      const res = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ editProduct: updatedProduct }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProducts(data.products);
+        cancelEditingProduct();
+        notifySaved(`Updated "${updatedProduct.name}".`);
+      }
+      return;
+    }
+
     const newProduct: Product = {
       id: `prod-${Date.now()}`,
       code: newProdCode.trim() || `${products.length + 701}`,
@@ -649,6 +833,40 @@ export default function AlbarkaModernPOS() {
       setNewProdPrice("");
       setNewProdImageUrl("");
       notifySaved(`Added "${newProduct.name}" to menu catalog.`);
+    }
+  }
+
+  function startEditingProduct(product: Product) {
+    setEditingProductId(product.id);
+    setNewProdName(product.name);
+    setNewProdCode(product.code);
+    setNewProdSegment(product.segment);
+    setNewProdCategory(product.category);
+    setNewProdPrice(String(product.variants[0]?.price || 0));
+    setNewProdStock(String(product.stockQty));
+    setNewProdImageUrl(product.imageUrl || "");
+  }
+
+  function cancelEditingProduct() {
+    setEditingProductId(null);
+    setNewProdName("");
+    setNewProdCode("");
+    setNewProdPrice("");
+    setNewProdStock("100");
+    setNewProdImageUrl("");
+  }
+
+  async function handleDeleteProduct(productId: string, productName: string) {
+    const res = await fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleteProductId: productId }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setProducts(data.products);
+      if (editingProductId === productId) cancelEditingProduct();
+      notifySaved(`Deleted "${productName}" from menu catalog.`);
     }
   }
 
@@ -1761,13 +1979,37 @@ export default function AlbarkaModernPOS() {
                                 : "bg-white border-[#d4dce4] hover:border-[#2b2d42]"
                             }`}
                           >
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between gap-2">
                               <span className="font-semibold text-sm text-[#2b2d42]">
                                 {party.name}
                               </span>
-                              <span className="text-xs font-semibold px-2 py-0.5 rounded bg-[#edf2f4] text-[#2b2d42]">
-                                {party.type}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-[#edf2f4] text-[#2b2d42]">
+                                  {party.type}
+                                </span>
+                                <button
+                                  type="button"
+                                  title="Edit Party Account"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEditingParty(party);
+                                  }}
+                                  className="p-1.5 rounded-lg bg-[#edf2f4] hover:bg-[#2b2d42] text-[#2b2d42] hover:text-white transition"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Delete Party Account"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteParty(party.id, party.name);
+                                  }}
+                                  className="p-1.5 rounded-lg bg-[#edf2f4] hover:bg-[#ef233c] text-[#4a4e69] hover:text-white transition"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                             <div className="flex items-center justify-between mt-1.5 text-xs">
                               <span className="text-[#4a4e69]">{party.phone}</span>
@@ -1794,9 +2036,20 @@ export default function AlbarkaModernPOS() {
                     onSubmit={handleCreateParty}
                     className="pos-card rounded-2xl p-5 space-y-3.5"
                   >
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-[#ef233c]">
-                      + Open New Khata Account
-                    </h4>
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-[#ef233c]">
+                        {editingPartyId ? "Edit Khata Account" : "+ Open New Khata Account"}
+                      </h4>
+                      {editingPartyId && (
+                        <button
+                          type="button"
+                          onClick={cancelEditingParty}
+                          className="text-xs font-semibold text-[#4a4e69] hover:text-[#2b2d42] flex items-center gap-1"
+                        >
+                          <X className="w-3.5 h-3.5" /> Cancel
+                        </button>
+                      )}
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <input
                         type="text"
@@ -1822,12 +2075,23 @@ export default function AlbarkaModernPOS() {
                         placeholder="Phone (0300-...)"
                         className="bg-[#f8fafc] border border-[#d4dce4] rounded-xl px-3 py-2 text-sm text-[#2b2d42]"
                       />
+                      <div className="sm:col-span-2">
+                        <label className="text-xs font-semibold text-[#4a4e69] block mb-1">
+                          {editingPartyId ? "Current Balance (PKR)" : "Opening Balance (PKR)"}
+                        </label>
+                        <input
+                          type="number"
+                          value={newPartyOpening}
+                          onChange={(e) => setNewPartyOpening(e.target.value)}
+                          className="w-full bg-[#f8fafc] border border-[#d4dce4] rounded-xl px-3.5 py-2 text-sm font-mono text-[#2b2d42]"
+                        />
+                      </div>
                     </div>
                     <button
                       type="submit"
                       className="w-full py-2.5 rounded-xl bg-[#2b2d42] hover:bg-[#ef233c] text-white text-sm font-semibold transition"
                     >
-                      Create Khata Account
+                      {editingPartyId ? "Save Khata Account Changes" : "Create Khata Account"}
                     </button>
                   </form>
                 </div>
@@ -1893,6 +2157,83 @@ export default function AlbarkaModernPOS() {
                     </div>
                   </form>
 
+                  {/* Edit Voucher Form (Appears when editing a Ledger Entry) */}
+                  {editingEntryId && (
+                    <form
+                      onSubmit={handleSaveEditedEntry}
+                      className="pos-card rounded-2xl p-5 border-2 border-[#ef233c] space-y-3.5 animate-panel"
+                    >
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-bold text-sm text-[#2b2d42]">
+                          Edit Ledger Voucher ({editEntryVoucherNo})
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => setEditingEntryId(null)}
+                          className="text-xs font-semibold text-[#4a4e69] hover:text-[#2b2d42] flex items-center gap-1"
+                        >
+                          <X className="w-4 h-4" /> Cancel
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                        <div>
+                          <label className="text-xs font-semibold text-[#4a4e69] block mb-1">
+                            Voucher #
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={editEntryVoucherNo}
+                            onChange={(e) => setEditEntryVoucherNo(e.target.value)}
+                            className="w-full bg-[#f8fafc] border border-[#d4dce4] rounded-xl px-3 py-2 text-sm font-mono text-[#2b2d42]"
+                          />
+                        </div>
+                        <div className="sm:col-span-1">
+                          <label className="text-xs font-semibold text-[#4a4e69] block mb-1">
+                            Debit (PKR)
+                          </label>
+                          <input
+                            type="number"
+                            value={editEntryDebit}
+                            onChange={(e) => setEditEntryDebit(e.target.value)}
+                            className="w-full bg-[#f8fafc] border border-[#d4dce4] rounded-xl px-3 py-2 text-sm font-mono text-[#2b2d42]"
+                          />
+                        </div>
+                        <div className="sm:col-span-1">
+                          <label className="text-xs font-semibold text-[#4a4e69] block mb-1">
+                            Credit (PKR)
+                          </label>
+                          <input
+                            type="number"
+                            value={editEntryCredit}
+                            onChange={(e) => setEditEntryCredit(e.target.value)}
+                            className="w-full bg-[#f8fafc] border border-[#d4dce4] rounded-xl px-3 py-2 text-sm font-mono text-[#2b2d42]"
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <button
+                            type="submit"
+                            className="w-full py-2 px-4 rounded-xl bg-[#2b2d42] hover:bg-[#ef233c] text-white font-semibold text-sm transition"
+                          >
+                            Update Voucher
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-[#4a4e69] block mb-1">
+                          Description / Narration
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={editEntryDesc}
+                          onChange={(e) => setEditEntryDesc(e.target.value)}
+                          className="w-full bg-[#f8fafc] border border-[#d4dce4] rounded-xl px-3 py-2 text-sm text-[#2b2d42]"
+                        />
+                      </div>
+                    </form>
+                  )}
+
                   <div className="pos-card rounded-2xl p-5">
                     <h3 className="font-bold text-base text-[#2b2d42] mb-3.5">
                       Double-Entry Khata Statement
@@ -1906,8 +2247,9 @@ export default function AlbarkaModernPOS() {
                             <th className="py-3 px-3 font-semibold">Description</th>
                             <th className="py-3 px-3 text-right font-semibold">Debit</th>
                             <th className="py-3 px-3 text-right font-semibold">Credit</th>
+                            <th className="py-3 px-3 text-right font-semibold">Balance</th>
                             <th className="py-3 px-3 text-right rounded-r-lg font-semibold">
-                              Balance
+                              Actions
                             </th>
                           </tr>
                         </thead>
@@ -1932,6 +2274,26 @@ export default function AlbarkaModernPOS() {
                               <td className="py-3 px-3 text-right font-mono font-bold text-[#2b2d42]">
                                 PKR {entry.balanceAfter.toLocaleString()}
                               </td>
+                              <td className="py-3 px-3 text-right">
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    title="Edit Voucher"
+                                    onClick={() => startEditingEntry(entry)}
+                                    className="p-1.5 rounded-lg bg-[#edf2f4] hover:bg-[#2b2d42] text-[#2b2d42] hover:text-white transition"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title="Delete Voucher"
+                                    onClick={() => handleDeleteEntry(entry.id, entry.voucherNo)}
+                                    className="p-1.5 rounded-lg bg-[#edf2f4] hover:bg-[#ef233c] text-[#4a4e69] hover:text-white transition"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -1952,9 +2314,22 @@ export default function AlbarkaModernPOS() {
                 onSubmit={handleAddProduct}
                 className="lg:col-span-4 pos-card rounded-2xl p-5 space-y-4 h-fit"
               >
-                <h3 className="font-bold text-base text-[#2b2d42]">
-                  + Add New Dish or Retail Product
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-base text-[#2b2d42]">
+                    {editingProductId
+                      ? `Edit Menu Item (#${newProdCode})`
+                      : "+ Add New Dish or Retail Product"}
+                  </h3>
+                  {editingProductId && (
+                    <button
+                      type="button"
+                      onClick={cancelEditingProduct}
+                      className="text-xs font-semibold text-[#4a4e69] hover:text-[#2b2d42] flex items-center gap-1"
+                    >
+                      <X className="w-4 h-4" /> Cancel
+                    </button>
+                  )}
+                </div>
 
                 <input
                   type="text"
@@ -2043,9 +2418,11 @@ export default function AlbarkaModernPOS() {
                   disabled={!currentUser.permissions.canManageMenuPricing}
                   className="w-full py-2.5 rounded-xl bg-[#ef233c] hover:bg-[#d80032] disabled:opacity-50 text-white font-semibold text-sm transition"
                 >
-                  {currentUser.permissions.canManageMenuPricing
-                    ? "Save to Hybrid Menu"
-                    : "Admin / Manager Required"}
+                  {!currentUser.permissions.canManageMenuPricing
+                    ? "Admin / Manager Required"
+                    : editingProductId
+                    ? "Save Menu Item Changes"
+                    : "Save to Hybrid Menu"}
                 </button>
               </form>
 
@@ -2062,7 +2439,9 @@ export default function AlbarkaModernPOS() {
                         <th className="py-3 px-3 font-semibold">Dish / Product</th>
                         <th className="py-3 px-3 font-semibold">Segment</th>
                         <th className="py-3 px-3 font-semibold">Portions & Prices</th>
-                        <th className="py-3 px-3 text-right rounded-r-lg font-semibold">Photo</th>
+                        <th className="py-3 px-3 text-right rounded-r-lg font-semibold">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#e2e8f0]">
@@ -2110,26 +2489,47 @@ export default function AlbarkaModernPOS() {
                             ))}
                           </td>
                           <td className="py-3 px-3 text-right">
-                            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#edf2f4] hover:bg-[#2b2d42] text-[#2b2d42] hover:text-white text-xs font-semibold cursor-pointer transition">
-                              <Camera className="w-3.5 h-3.5 text-[#ef233c]" />
-                              <span>{p.imageUrl ? "Replace" : "Upload"}</span>
-                              <input
-                                type="file"
-                                accept="image/*"
-                                className="hidden"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (!file) return;
-                                  const reader = new FileReader();
-                                  reader.onload = () => {
-                                    if (typeof reader.result === "string") {
-                                      handleUpdateProductImage(p.id, reader.result);
-                                    }
-                                  };
-                                  reader.readAsDataURL(file);
-                                }}
-                              />
-                            </label>
+                            <div className="inline-flex items-center gap-1.5">
+                              <label
+                                title="Upload / Replace Photo"
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#edf2f4] hover:bg-[#2b2d42] text-[#2b2d42] hover:text-white text-xs font-semibold cursor-pointer transition"
+                              >
+                                <Camera className="w-3.5 h-3.5 text-[#ef233c]" />
+                                <span>Photo</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    const reader = new FileReader();
+                                    reader.onload = () => {
+                                      if (typeof reader.result === "string") {
+                                        handleUpdateProductImage(p.id, reader.result);
+                                      }
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                title="Edit Menu Item"
+                                onClick={() => startEditingProduct(p)}
+                                className="p-1.5 rounded-lg bg-[#edf2f4] hover:bg-[#2b2d42] text-[#2b2d42] hover:text-white transition"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Delete Menu Item"
+                                onClick={() => handleDeleteProduct(p.id, p.name)}
+                                className="p-1.5 rounded-lg bg-[#edf2f4] hover:bg-[#ef233c] text-[#4a4e69] hover:text-white transition"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}

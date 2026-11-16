@@ -33,6 +33,16 @@ export async function PUT(request: Request) {
       db.products = [prod, ...db.products];
     }
 
+    if (body.editProduct) {
+      const updated = body.editProduct as Product;
+      db.products = db.products.map((p) => (p.id === updated.id ? updated : p));
+    }
+
+    if (body.deleteProductId) {
+      const targetId = body.deleteProductId as string;
+      db.products = db.products.filter((p) => p.id !== targetId);
+    }
+
     if (body.updateProductImage) {
       const { productId, imageUrl } = body.updateProductImage as {
         productId: string;
