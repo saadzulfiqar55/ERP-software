@@ -4,8 +4,8 @@ import { resolveAuthenticatedActor } from "@/core/auth";
 import { withTransaction } from "@/core/db";
 import { toMinorUnits } from "@/core/money";
 import { sanitizeNoSqlPayload } from "@/core/validation";
-import { readDb } from "@/lib/db";
-import { pingMongoConnection } from "@/lib/mongodb";
+import { getPublicMongoConfig, readDb } from "@/lib/db";
+import { isMaskedMongoUri, pingMongoConnection } from "@/lib/mongodb";
 import { MongoDBConfig, PRAConfig, Product } from "@/lib/types";
 import { AccountingService } from "@/modules/accounting/accounting.service";
 import { InventoryService } from "@/modules/inventory/inventory.service";
@@ -14,6 +14,7 @@ export async function GET() {
   const db = readDb();
   return NextResponse.json({
     ...db,
+    mongoConfig: getPublicMongoConfig(db.mongoConfig),
     products: InventoryService.listActiveProducts(db),
     parties: AccountingService.listActiveParties(db),
   });
@@ -45,11 +46,22 @@ export async function PUT(request: Request) {
       }
 
       if (body.mongoConfig) {
-        const nextMongo = {
+        const incoming = body.mongoConfig as Partial<MongoDBConfig>;
+        const preservedUri =
+          incoming.uri && !isMaskedMongoUri(incoming.uri)
+            ? incoming.uri.trim()
+            : txDb.mongoConfig.uri;
+
+        const nextMongo: MongoDBConfig = {
           ...txDb.mongoConfig,
-          ...(body.mongoConfig as Partial<MongoDBConfig>),
+          ...incoming,
+          uri: preservedUri,
         };
-        const pingResult = await pingMongoConnection(nextMongo.uri);
+        const pingResult = await pingMongoConnection(
+          nextMongo.uri,
+          nextMongo.dbName
+        );
+        nextMongo.dbName = pingResult.dbName;
         nextMongo.lastStatus = `${pingResult.engine}: ${pingResult.message}`;
         nextMongo.enabled = pingResult.connected;
         txDb.mongoConfig = nextMongo;
@@ -123,6 +135,7 @@ export async function PUT(request: Request) {
 
     return NextResponse.json({
       ...db,
+      mongoConfig: getPublicMongoConfig(db.mongoConfig),
       products: InventoryService.listActiveProducts(db),
       parties: AccountingService.listActiveParties(db),
     });

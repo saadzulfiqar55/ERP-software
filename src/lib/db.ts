@@ -9,6 +9,12 @@ import {
   INITIAL_USERS,
 } from "./seed-data";
 import {
+  DEFAULT_ISOLATED_DB_NAME,
+  hasUnreplacedPasswordPlaceholder,
+  maskMongoUri,
+  resolveIsolatedDbName,
+} from "./mongodb";
+import {
   ActiveSession,
   CashierShift,
   DocumentCounter,
@@ -45,14 +51,42 @@ export interface DatabaseSchema {
 const DB_DIR = path.join(process.cwd(), "data");
 const DB_FILE = path.join(DB_DIR, "albarka-db.json");
 
-const DEFAULT_MONGO_CONFIG: MongoDBConfig = {
-  enabled: Boolean(process.env.MONGODB_URI),
-  uri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/albarka_pos",
-  dbName: "albarka_pos",
-  lastStatus: process.env.MONGODB_URI
-    ? "Configured via MONGODB_URI"
-    : "Local JSON File Store Active (data/albarka-db.json) — MongoDB Ready",
+function getEnvMongoConfig(): MongoDBConfig | null {
+  const envUri = process.env.MONGODB_URI?.trim();
+  if (!envUri) return null;
+
+  let safeDb = DEFAULT_ISOLATED_DB_NAME;
+  try {
+    safeDb = resolveIsolatedDbName(process.env.MONGODB_DB_NAME);
+  } catch {
+    safeDb = DEFAULT_ISOLATED_DB_NAME;
+  }
+
+  const needsPassword = hasUnreplacedPasswordPlaceholder(envUri);
+  return {
+    enabled: !needsPassword,
+    uri: envUri,
+    dbName: safeDb,
+    lastStatus: needsPassword
+      ? `Atlas URI detected in .env.local (isolated DB: ${safeDb}) — replace <db_password> with your MongoDB password to connect.`
+      : `Configured via .env.local (isolated DB: ${safeDb})`,
+  };
+}
+
+const DEFAULT_MONGO_CONFIG: MongoDBConfig = getEnvMongoConfig() || {
+  enabled: false,
+  uri: "mongodb://127.0.0.1:27017/albarka_erp",
+  dbName: DEFAULT_ISOLATED_DB_NAME,
+  lastStatus:
+    "Local JSON File Store Active (data/albarka-db.json) — MongoDB Ready",
 };
+
+export function getPublicMongoConfig(config: MongoDBConfig): MongoDBConfig {
+  return {
+    ...config,
+    uri: maskMongoUri(config.uri),
+  };
+}
 
 const DEFAULT_CASHIER_SHIFT: CashierShift = {
   id: "shift-2026-11-17-morning",
@@ -130,11 +164,12 @@ export function readDb(): DatabaseSchema {
     }
     const raw = fs.readFileSync(DB_FILE, "utf-8");
     const parsed = JSON.parse(raw) as Partial<DatabaseSchema>;
+    const envMongo = getEnvMongoConfig();
     return {
       ...defaults,
       ...parsed,
       users: parsed.users && parsed.users.length > 0 ? parsed.users : INITIAL_USERS,
-      mongoConfig: parsed.mongoConfig || DEFAULT_MONGO_CONFIG,
+      mongoConfig: envMongo || parsed.mongoConfig || DEFAULT_MONGO_CONFIG,
       sessionAuditLogs: parsed.sessionAuditLogs || [],
       immutableAuditLogs: parsed.immutableAuditLogs || defaults.immutableAuditLogs,
       idempotencyRecords: parsed.idempotencyRecords || [],

@@ -166,8 +166,8 @@ export function AlbarkaMaterial3ERP({
   const [praConfig, setPraConfig] = useState<PRAConfig>(INITIAL_PRA_CONFIG);
   const [mongoConfig, setMongoConfig] = useState<MongoDBConfig>({
     enabled: false,
-    uri: "mongodb://127.0.0.1:27017/albarka_pos",
-    dbName: "albarka_pos",
+    uri: "mongodb://127.0.0.1:27017/albarka_erp",
+    dbName: "albarka_erp",
     lastStatus: "Local JSON File Store Active (data/albarka-db.json) — MongoDB Ready",
   });
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
@@ -2765,11 +2765,20 @@ export function AlbarkaMaterial3ERP({
 
               {settingsSubTab === "MONGODB_DATABASE" && (
                 <Card className="space-y-4">
-                  <h2 className="text-base font-semibold text-md-on-surface">
-                    MongoDB connection configuration
-                  </h2>
-                  <div className="p-3.5 rounded-xl bg-md-surface-container-low text-xs text-md-on-surface-variant">
-                    {mongoConfig.lastStatus}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-base font-semibold text-md-on-surface">
+                      MongoDB connection configuration
+                    </h2>
+                    <StatusChip
+                      label={`Isolated DB: ${mongoConfig.dbName || "albarka_erp"}`}
+                      variant={mongoConfig.enabled ? "success" : "primary"}
+                    />
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-md-surface-container-low text-xs text-md-on-surface-variant space-y-1">
+                    <div>{mongoConfig.lastStatus}</div>
+                    <div className="text-[11px] opacity-80">
+                      Protected databases (such as <code className="font-mono">votix</code>) are blocked so Albarka ERP data stays in its own separate database (<code className="font-mono">albarka_erp</code>).
+                    </div>
                   </div>
                   <form onSubmit={handleSaveMongoConfig} className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
