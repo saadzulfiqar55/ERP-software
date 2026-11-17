@@ -414,7 +414,7 @@ export default function InvoicesView({
                     }
                     e.target.value = "";
                   }}
-                  className="h-9 px-3 rounded-lg bg-md-surface-container-low border border-md-outline-variant text-xs text-md-on-surface"
+                  className="h-9 px-3.5 rounded-full border-0 bg-md-secondary-container/75 hover:bg-md-secondary-container text-xs font-medium text-md-on-secondary-container cursor-pointer transition-all duration-150"
                 >
                   <option value="">+ Pick from product catalogue…</option>
                   {products.map((p) => (

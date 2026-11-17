@@ -5,24 +5,33 @@ import { StatusChip, StatusChipVariant } from "./Chip";
 
 /**
  * Reusable Material Design 3 Card
- * Flat tonal or soft-outlined surface (`outline-variant/75`).
+ * Borderless tonal surface (`border-0`). Set `interactive` on clickable cards (e.g. menu items)
+ * to enable a subtle hover lift and scale transition.
  */
 export function Card({
   children,
   className = "",
   variant = "outlined",
+  interactive = false,
 }: {
   children: React.ReactNode;
   className?: string;
   variant?: "outlined" | "tonal";
+  interactive?: boolean;
 }) {
   const surfaceClass =
     variant === "tonal"
-      ? "bg-md-surface-container-low border border-md-outline-variant/40"
-      : "bg-md-surface-container-lowest border border-md-outline-variant/75 shadow-[0_1px_3px_rgba(25,28,32,0.03)]";
+      ? "border-0 bg-md-surface-container-low shadow-[0_1px_4px_rgba(25,28,32,0.03)]"
+      : "border-0 bg-md-surface-container-lowest shadow-[0_2px_10px_rgba(25,28,32,0.04)]";
+
+  const interactiveClass = interactive
+    ? "transition-all duration-200 ease-out hover:-translate-y-[2px] hover:scale-[1.01] hover:shadow-[0_10px_24px_rgba(25,28,32,0.08)]"
+    : "";
 
   return (
-    <div className={`rounded-2xl p-6 transition-all duration-200 ${surfaceClass} ${className}`}>
+    <div
+      className={`rounded-2xl p-6 ${surfaceClass} ${interactiveClass} ${className}`}
+    >
       {children}
     </div>
   );
@@ -47,7 +56,7 @@ export function StatCard({
   caption?: string;
 }) {
   return (
-    <Card className="flex flex-col justify-between gap-4 hover:border-md-primary/40">
+    <Card className="flex flex-col justify-between gap-4">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-md-on-surface-variant">
           {label}

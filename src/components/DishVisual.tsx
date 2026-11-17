@@ -61,7 +61,7 @@ export default function DishVisual({
   }
 
   return (
-    <div className="relative h-40 w-full rounded-2xl bg-md-surface-container-low group-hover:bg-md-secondary-container/50 border border-md-outline-variant overflow-hidden flex flex-col justify-between transition">
+    <div className="relative h-40 w-full rounded-2xl bg-md-surface-container-low group-hover:bg-md-secondary-container/45 overflow-hidden flex flex-col justify-between transition-all duration-300 ease-out">
       {canEditImage && onImageUpload && (
         <input
           ref={fileInputRef}
@@ -76,11 +76,11 @@ export default function DishVisual({
         <img
           src={product.imageUrl}
           alt={product.name}
-          className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+          className="absolute inset-0 w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300 ease-out"
         />
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center select-none">
-          <div className="w-11 h-11 rounded-2xl bg-md-primary-container text-md-on-primary-container flex items-center justify-center mb-2 transition">
+          <div className="w-11 h-11 rounded-2xl bg-md-primary-container text-md-on-primary-container group-hover:scale-105 flex items-center justify-center mb-2 transition-transform duration-250 ease-out">
             <StationIcon className="w-5 h-5" strokeWidth={1.8} />
           </div>
           <div className="flex items-center gap-1.5 text-xs font-medium text-md-on-surface-variant">
@@ -96,7 +96,7 @@ export default function DishVisual({
       {/* Top Overlay Badges */}
       <div className="relative z-10 flex items-center justify-between p-2.5">
         <div className="flex items-center gap-1.5">
-          <span className="font-mono text-xs font-medium text-md-on-surface bg-md-surface-container-lowest px-2.5 py-1 rounded-lg border border-md-outline-variant">
+          <span className="font-mono text-xs font-medium text-md-on-surface bg-md-surface-container-lowest/95 px-2.5 py-1 rounded-lg shadow-2xs">
             #{product.code}
           </span>
           {product.popular && (
@@ -114,7 +114,7 @@ export default function DishVisual({
               fileInputRef.current?.click();
             }}
             title="Upload Menu Item Photo"
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-md-surface-container-lowest hover:bg-md-primary text-md-on-surface hover:text-md-on-primary border border-md-outline-variant text-xs font-medium transition"
+            className="border-0 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-md-surface-container-lowest/95 hover:bg-md-primary text-md-on-surface hover:text-md-on-primary text-xs font-medium shadow-2xs transition-all duration-200"
           >
             <Camera className="w-3.5 h-3.5" strokeWidth={1.8} />
             <span>{product.imageUrl ? "Change" : "Photo"}</span>
@@ -129,7 +129,7 @@ export default function DishVisual({
             ? station.label
             : `Stock: ${product.stockQty} ${product.unit}`}
         </span>
-        <span className="text-xs font-medium px-2 py-1 rounded-lg bg-md-surface-container-lowest text-md-on-surface-variant border border-md-outline-variant">
+        <span className="text-xs font-medium px-2 py-1 rounded-lg bg-md-surface-container-lowest/95 text-md-on-surface-variant shadow-2xs">
           {product.taxMode === "INCLUSIVE"
             ? "GST Incl."
             : product.taxMode === "EXEMPT"

@@ -188,10 +188,10 @@ export default function AuthScreen({
                       setPinInput("");
                       setError("");
                     }}
-                    className={`p-4 rounded-2xl border cursor-pointer transition flex items-center justify-between ${
+                    className={`p-4 rounded-2xl border-0 cursor-pointer transition-colors duration-200 flex items-center justify-between ${
                       isSelected
-                        ? "border-2 border-md-primary bg-md-primary-container/25"
-                        : "border-md-outline-variant hover:bg-md-surface-container-low"
+                        ? "bg-md-primary-container/45 ring-2 ring-md-primary/60 shadow-xs"
+                        : "bg-md-surface-container-low hover:bg-md-surface-container-high/70"
                     }`}
                   >
                     <div className="flex items-center gap-3.5">
@@ -317,7 +317,7 @@ export default function AuthScreen({
                   type="button"
                   disabled={loading}
                   onClick={() => handleKeypadPress(digit)}
-                  className="h-12 rounded-full bg-md-surface-container-lowest hover:bg-md-secondary-container border border-md-outline-variant font-mono font-medium text-base text-md-on-surface transition"
+                  className="h-12 rounded-full border-0 bg-md-surface-container-lowest hover:bg-md-secondary-container shadow-xs font-mono font-medium text-base text-md-on-surface transition-all duration-150 hover:-translate-y-[1px] hover:scale-[1.02] active:scale-[0.97]"
                 >
                   {digit}
                 </button>
@@ -325,21 +325,21 @@ export default function AuthScreen({
               <button
                 type="button"
                 onClick={() => handleKeypadPress("CLEAR")}
-                className="h-12 rounded-full bg-md-error-container hover:opacity-90 font-medium text-xs text-md-on-error-container transition"
+                className="h-12 rounded-full border-0 bg-md-error-container hover:brightness-95 font-medium text-xs text-md-on-error-container transition-all duration-150 hover:-translate-y-[1px] hover:scale-[1.02] active:scale-[0.97]"
               >
                 Clear
               </button>
               <button
                 type="button"
                 onClick={() => handleKeypadPress("0")}
-                className="h-12 rounded-full bg-md-surface-container-lowest hover:bg-md-secondary-container border border-md-outline-variant font-mono font-medium text-base text-md-on-surface transition"
+                className="h-12 rounded-full border-0 bg-md-surface-container-lowest hover:bg-md-secondary-container shadow-xs font-mono font-medium text-base text-md-on-surface transition-all duration-150 hover:-translate-y-[1px] hover:scale-[1.02] active:scale-[0.97]"
               >
                 0
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="h-12 rounded-full bg-md-primary hover:bg-md-primary-strong text-md-on-primary font-medium text-sm transition"
+                className="h-12 rounded-full border-0 bg-md-primary hover:bg-md-primary-strong text-md-on-primary shadow-sm font-medium text-sm transition-all duration-150 hover:-translate-y-[1px] hover:scale-[1.02] active:scale-[0.97]"
               >
                 {loading ? "..." : "Sign In"}
               </button>

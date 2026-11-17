@@ -30,7 +30,7 @@ export function StatusChip({
 
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium leading-none tracking-[0.01em] select-none ${styles}`}
+      className={`border-0 inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium leading-none tracking-[0.01em] select-none ${styles}`}
     >
       {label}
     </span>
@@ -61,7 +61,7 @@ export function mapInvoiceStatusToChipVariant(
 }
 
 /**
- * Reusable Material Design 3 FilterChip (soft outline-variant border when unselected, check icon when selected)
+ * Reusable Material Design 3 FilterChip (Borderless tonal surface + subtle hover lift)
  */
 export function FilterChip({
   label,
@@ -79,13 +79,18 @@ export function FilterChip({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      className={`h-8 px-3.5 rounded-lg inline-flex items-center gap-1.5 text-xs font-medium tracking-[0.01em] transition-all duration-200 select-none ${
+      className={`border-0 h-8 px-3.5 rounded-lg inline-flex items-center gap-1.5 text-xs font-medium tracking-[0.01em] transition-all duration-200 ease-out select-none ${
         selected
-          ? "bg-md-secondary-container text-md-on-secondary-container border border-md-primary/20 shadow-[0_1px_2px_rgba(16,28,43,0.06)]"
-          : "bg-md-surface-container-lowest text-md-on-surface-variant border border-md-outline-variant/85 hover:bg-md-surface-container-low hover:border-md-outline/60 hover:text-md-on-surface"
+          ? "bg-md-secondary-container text-md-on-secondary-container shadow-[0_2px_6px_rgba(16,28,43,0.08)] hover:-translate-y-[1px]"
+          : "bg-md-surface-container-low text-md-on-surface-variant hover:bg-md-surface-container-high hover:text-md-on-surface hover:-translate-y-[1px] hover:scale-[1.015]"
       }`}
     >
-      {selected && <Check className="w-3.5 h-3.5 shrink-0 text-md-primary" strokeWidth={2.2} />}
+      {selected && (
+        <Check
+          className="w-3.5 h-3.5 shrink-0 text-md-primary"
+          strokeWidth={2.2}
+        />
+      )}
       <span>{label}</span>
       {count !== undefined && (
         <span className="tabular-nums opacity-75">({count})</span>
@@ -95,7 +100,7 @@ export function FilterChip({
 }
 
 /**
- * Reusable Material Design 3 SegmentedButton (Pill group with soft dividers and check icon)
+ * Reusable Material Design 3 SegmentedButton (Borderless tonal pill track)
  */
 export function SegmentedButton<T extends string>({
   options,
@@ -109,7 +114,7 @@ export function SegmentedButton<T extends string>({
   return (
     <div
       role="group"
-      className="inline-flex rounded-full border border-md-outline-variant/90 p-0.5 bg-md-surface-container-low shadow-[inset_0_1px_2px_rgba(25,28,32,0.04)]"
+      className="border-0 inline-flex rounded-full p-1 bg-md-surface-container-low shadow-[inset_0_1px_2px_rgba(25,28,32,0.05)]"
     >
       {options.map((opt) => {
         const isSelected = opt.value === value;
@@ -119,13 +124,15 @@ export function SegmentedButton<T extends string>({
             type="button"
             onClick={() => onChange(opt.value)}
             aria-pressed={isSelected}
-            className={`h-9 px-4 rounded-full text-xs font-medium inline-flex items-center gap-1.5 transition-all duration-200 select-none ${
+            className={`border-0 h-9 px-4 rounded-full text-xs font-medium inline-flex items-center gap-1.5 transition-all duration-200 ease-out select-none ${
               isSelected
-                ? "bg-md-secondary-container text-md-on-secondary-container font-semibold shadow-[0_1px_3px_rgba(16,28,43,0.10)]"
-                : "text-md-on-surface-variant hover:text-md-on-surface hover:bg-md-surface-container-lowest/60"
+                ? "bg-md-secondary-container text-md-on-secondary-container font-semibold shadow-[0_1px_4px_rgba(16,28,43,0.10)]"
+                : "text-md-on-surface-variant hover:text-md-on-surface hover:bg-md-surface-container-lowest/70"
             }`}
           >
-            {isSelected && <Check className="w-3.5 h-3.5 text-md-primary" strokeWidth={2.2} />}
+            {isSelected && (
+              <Check className="w-3.5 h-3.5 text-md-primary" strokeWidth={2.2} />
+            )}
             <span>{opt.label}</span>
           </button>
         );

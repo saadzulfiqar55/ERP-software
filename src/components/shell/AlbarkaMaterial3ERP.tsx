@@ -1588,7 +1588,8 @@ export function AlbarkaMaterial3ERP({
                     {filteredProducts.map((product) => (
                       <Card
                         key={product.id}
-                        className="p-4! flex flex-col justify-between group hover:border-md-primary transition"
+                        interactive
+                        className="p-4! flex flex-col justify-between group cursor-pointer"
                       >
                         <div
                           onClick={() => {
@@ -1620,7 +1621,7 @@ export function AlbarkaMaterial3ERP({
                               key={variant.id}
                               type="button"
                               onClick={() => addToCart(product, variant)}
-                              className="w-full h-10 px-4 rounded-full bg-md-surface-container-low hover:bg-md-primary text-md-on-surface hover:text-md-on-primary text-xs font-medium flex items-center justify-between transition"
+                              className="w-full h-10 px-4 rounded-full border-0 bg-md-surface-container-low hover:bg-md-primary text-md-on-surface hover:text-md-on-primary text-xs font-medium flex items-center justify-between transition-all duration-150 hover:-translate-y-[1px] hover:scale-[1.01] active:scale-[0.985]"
                             >
                               <span>{variant.name}</span>
                               <span className="font-mono tabular-nums font-semibold">
@@ -1724,7 +1725,7 @@ export function AlbarkaMaterial3ERP({
                                 onClick={() =>
                                   updateQuantity(item.cartItemId, -1)
                                 }
-                                className="w-7 h-7 rounded-full bg-md-surface-container-lowest border border-md-outline-variant text-xs font-bold"
+                                className="w-7 h-7 rounded-full border-0 bg-md-surface-container-lowest hover:bg-md-secondary-container shadow-xs text-xs font-bold transition-all duration-150 hover:scale-105 active:scale-95"
                               >
                                 -
                               </button>
@@ -1736,7 +1737,7 @@ export function AlbarkaMaterial3ERP({
                                 onClick={() =>
                                   updateQuantity(item.cartItemId, 1)
                                 }
-                                className="w-7 h-7 rounded-full bg-md-surface-container-lowest border border-md-outline-variant text-xs font-bold"
+                                className="w-7 h-7 rounded-full border-0 bg-md-surface-container-lowest hover:bg-md-secondary-container shadow-xs text-xs font-bold transition-all duration-150 hover:scale-105 active:scale-95"
                               >
                                 +
                               </button>
@@ -2217,10 +2218,10 @@ export function AlbarkaMaterial3ERP({
                           <div
                             key={party.id}
                             onClick={() => setSelectedPartyId(party.id)}
-                            className={`p-3.5 rounded-2xl border cursor-pointer transition ${
+                            className={`p-3.5 rounded-2xl border-0 cursor-pointer transition-colors duration-200 ${
                               selectedPartyId === party.id
-                                ? "border-2 border-md-primary bg-md-primary-container/20"
-                                : "border-md-outline-variant hover:bg-md-surface-container-low"
+                                ? "bg-md-primary-container/45 ring-2 ring-md-primary/60 shadow-xs"
+                                : "bg-md-surface-container-low hover:bg-md-surface-container-high/70"
                             }`}
                           >
                             <div className="flex items-center justify-between gap-2">
