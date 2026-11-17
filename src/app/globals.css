@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
   --md-primary: #36618E;
   --md-on-primary: #FFFFFF;
   --md-primary-container: #D1E4FF;
@@ -28,9 +29,13 @@
   --md-outline: #73777F;
   --md-outline-variant: #C3C7CF;
   --md-divider: #E1E2E8;
+  --md-card-shadow: 0 2px 10px rgba(25, 28, 32, 0.04);
+  --md-card-shadow-hover: 0 10px 24px rgba(25, 28, 32, 0.08);
+  --md-tonal-shadow: 0 1px 4px rgba(25, 28, 32, 0.03);
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;
   --md-primary: #A0CAFD;
   --md-on-primary: #003258;
   --md-primary-container: #194975;
@@ -50,14 +55,17 @@
   --md-on-warning-container: #FFDEA6;
   --md-surface: #111418;
   --md-on-surface: #E1E2E8;
-  --md-surface-container-lowest: #0B0E13;
-  --md-surface-container-low: #191C20;
-  --md-surface-container-high: #272A2F;
-  --md-surface-variant: #43474E;
+  --md-surface-container-lowest: #191D23;
+  --md-surface-container-low: #20252D;
+  --md-surface-container-high: #2B313B;
+  --md-surface-variant: #3E4450;
   --md-on-surface-variant: #C3C7CF;
   --md-outline: #8D9199;
   --md-outline-variant: #43474E;
-  --md-divider: #2E3137;
+  --md-divider: #2E333C;
+  --md-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --md-card-shadow-hover: 0 12px 28px rgba(0, 0, 0, 0.48), inset 0 0 0 1px rgba(160, 202, 253, 0.16);
+  --md-tonal-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
 @theme {

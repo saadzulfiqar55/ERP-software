@@ -84,6 +84,8 @@ import {
   SegmentedButton,
   Snackbar,
   StatusChip,
+  ThemeSelector,
+  ThemeToggle,
 } from "@/components/ui/m3";
 import DashboardView from "@/components/dashboard/DashboardView";
 import InvoicesView from "@/components/invoices/InvoicesView";
@@ -156,6 +158,7 @@ export function AlbarkaMaterial3ERP({
     | "MONGODB_DATABASE"
     | "RESTAURANT_PROFILES"
     | "ERP_AUDIT_COMPLIANCE"
+    | "APPEARANCE"
   >("PRA_INTEGRATION");
 
   // Persistent App Data State
@@ -1415,6 +1418,8 @@ export function AlbarkaMaterial3ERP({
 
           {/* Right Side 48px Touch-Target Action Icons & User Menu */}
           <div className="flex items-center gap-1 sm:gap-2 relative">
+            <ThemeToggle />
+
             <Button
               variant="icon"
               aria-label="Help and documentation"
@@ -2637,6 +2642,7 @@ export function AlbarkaMaterial3ERP({
                     { id: "MONGODB_DATABASE", label: "MongoDB" },
                     { id: "RESTAURANT_PROFILES", label: "Staff roles" },
                     { id: "ERP_AUDIT_COMPLIANCE", label: "Audit trail" },
+                    { id: "APPEARANCE", label: "Appearance" },
                   ] as const
                 ).map((tab) => (
                   <FilterChip
@@ -2852,6 +2858,21 @@ export function AlbarkaMaterial3ERP({
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                </Card>
+              )}
+              {settingsSubTab === "APPEARANCE" && (
+                <Card className="space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <h2 className="text-base font-semibold text-md-on-surface">
+                        Material 3 Theme & Appearance
+                      </h2>
+                      <p className="text-xs text-md-on-surface-variant mt-0.5">
+                        Switch between Light, Dark, or follow your OS color preference. Saved locally in your browser.
+                      </p>
+                    </div>
+                    <ThemeSelector />
                   </div>
                 </Card>
               )}

@@ -21,11 +21,11 @@ export function Card({
 }) {
   const surfaceClass =
     variant === "tonal"
-      ? "border-0 bg-md-surface-container-low shadow-[0_1px_4px_rgba(25,28,32,0.03)]"
-      : "border-0 bg-md-surface-container-lowest shadow-[0_2px_10px_rgba(25,28,32,0.04)]";
+      ? "border-0 bg-md-surface-container-low shadow-[var(--md-tonal-shadow)]"
+      : "border-0 bg-md-surface-container-lowest shadow-[var(--md-card-shadow)]";
 
   const interactiveClass = interactive
-    ? "transition-all duration-200 ease-out hover:-translate-y-[2px] hover:scale-[1.01] hover:shadow-[0_10px_24px_rgba(25,28,32,0.08)]"
+    ? "transition-all duration-200 ease-out hover:-translate-y-[2px] hover:scale-[1.01] hover:shadow-[var(--md-card-shadow-hover)]"
     : "";
 
   return (

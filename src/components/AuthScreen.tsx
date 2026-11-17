@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   Store,
 } from "lucide-react";
-import { Avatar, Button, Card, StatusChip } from "@/components/ui/m3";
+import { Avatar, Button, Card, StatusChip, ThemeToggle } from "@/components/ui/m3";
 
 interface AuthScreenProps {
   users: UserProfile[];
@@ -101,26 +101,29 @@ export default function AuthScreen({
 
   return (
     <div className="min-h-screen bg-md-surface flex items-center justify-center p-4 sm:p-8">
-      <div className="max-w-5xl w-full bg-md-surface-container-lowest border border-md-outline-variant rounded-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12">
+      <div className="max-w-5xl w-full bg-md-surface-container-lowest border-0 shadow-[var(--md-card-shadow)] rounded-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12">
         {/* Left 7 Cols: Profile Selection + Single-Session Status */}
         <div className="lg:col-span-7 p-6 sm:p-10 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-md-divider">
           <div>
             {/* Brand Row */}
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 rounded-2xl bg-md-primary text-md-on-primary flex items-center justify-center font-bold text-xl">
-                A
-              </div>
-              <div>
-                <div className="flex items-center gap-2.5">
-                  <h1 className="text-[22px] leading-[28px] font-normal text-md-on-surface">
-                    Albarka ERP & POS
-                  </h1>
-                  <StatusChip label="Material 3" variant="primary" />
+            <div className="flex items-start justify-between gap-4 mb-8">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-md-primary text-md-on-primary flex items-center justify-center font-bold text-xl shrink-0">
+                  A
                 </div>
-                <p className="text-sm text-md-on-surface-variant mt-0.5">
-                  HS256 JWT Session · OAuth 2.0 Ready · Single-Active-Session Lock
-                </p>
+                <div>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <h1 className="text-[22px] leading-[28px] font-normal text-md-on-surface">
+                      Albarka ERP & POS
+                    </h1>
+                    <StatusChip label="Material 3" variant="primary" />
+                  </div>
+                  <p className="text-sm text-md-on-surface-variant mt-0.5">
+                    HS256 JWT Session · OAuth 2.0 Ready · Single-Active-Session Lock
+                  </p>
+                </div>
               </div>
+              <ThemeToggle />
             </div>
 
             {/* Active Single-Session Lock Banner */}

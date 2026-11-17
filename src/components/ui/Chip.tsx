@@ -107,7 +107,7 @@ export function SegmentedButton<T extends string>({
   value,
   onChange,
 }: {
-  options: Array<{ value: T; label: string }>;
+  options: Array<{ value: T; label: string; icon?: React.ReactNode }>;
   value: T;
   onChange: (next: T) => void;
 }) {
@@ -130,8 +130,10 @@ export function SegmentedButton<T extends string>({
                 : "text-md-on-surface-variant hover:text-md-on-surface hover:bg-md-surface-container-lowest/70"
             }`}
           >
-            {isSelected && (
+            {isSelected ? (
               <Check className="w-3.5 h-3.5 text-md-primary" strokeWidth={2.2} />
+            ) : (
+              opt.icon ?? null
             )}
             <span>{opt.label}</span>
           </button>

@@ -28,8 +28,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${roboto.variable} ${robotoMono.variable}`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${roboto.variable} ${robotoMono.variable}`}
+    >
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var k="albarka-theme";var p=localStorage.getItem(k)||"light";var t=p==="system"?(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):(p==="dark"?"dark":"light");document.documentElement.setAttribute("data-theme",t);}catch(e){}})();`,
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"
