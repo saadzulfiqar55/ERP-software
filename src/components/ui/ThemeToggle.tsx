@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { Button } from "./Button";
 import { SegmentedButton } from "./Chip";
@@ -10,6 +11,9 @@ export type ResolvedTheme = "light" | "dark";
 
 const STORAGE_KEY = "albarka-theme";
 const THEME_EVENT = "albarka-theme-change";
+
+let activeViewTransitions = 0;
+let fallbackTransitionTimer: number | null = null;
 
 function getSystemTheme(): ResolvedTheme {
   if (typeof window === "undefined") return "light";
@@ -76,13 +80,65 @@ export function useThemePreference() {
   }, []);
 
   const updateTheme = (next: ThemePreference) => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, next);
-      applyThemeToDocument(next);
-      window.dispatchEvent(new Event(THEME_EVENT));
+    const commitTheme = () => {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(STORAGE_KEY, next);
+        applyThemeToDocument(next);
+        window.dispatchEvent(new Event(THEME_EVENT));
+      }
+      setPreference(next);
+      setResolvedTheme(resolveTheme(next));
+    };
+
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      commitTheme();
+      return;
     }
-    setPreference(next);
-    setResolvedTheme(resolveTheme(next));
+
+    const prefersReducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
+    if (prefersReducedMotion) {
+      commitTheme();
+      return;
+    }
+
+    const root = document.documentElement;
+    const startVT = (
+      document as Document & {
+        startViewTransition?: (cb: () => void) => { finished: Promise<void> };
+      }
+    ).startViewTransition;
+
+    if (typeof startVT === "function") {
+      // Freeze element-level CSS transitions for the snapshot so buttons, inputs,
+      // and surfaces cross-fade together cleanly in one compositor pass.
+      activeViewTransitions += 1;
+      root.classList.add("theme-snap");
+      const transition = startVT.call(document, () => {
+        flushSync(() => {
+          commitTheme();
+        });
+      });
+      transition.finished.finally(() => {
+        activeViewTransitions = Math.max(0, activeViewTransitions - 1);
+        if (activeViewTransitions === 0) {
+          root.classList.remove("theme-snap");
+        }
+      });
+      return;
+    }
+
+    // Fallback for browsers without View Transitions API: unify color transitions
+    if (fallbackTransitionTimer !== null) {
+      window.clearTimeout(fallbackTransitionTimer);
+    }
+    root.classList.add("theme-transitioning");
+    commitTheme();
+    fallbackTransitionTimer = window.setTimeout(() => {
+      root.classList.remove("theme-transitioning");
+      fallbackTransitionTimer = null;
+    }, 260);
   };
 
   const toggleLightDark = () => {
