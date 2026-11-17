@@ -1,48 +1,56 @@
-# Albarka Restaurant & Retail — Hybrid POS & ERP
+# Albarka ERP & POS — Material Design 3 (Material You)
 
-A modern full-stack **Next.js (App Router + TypeScript + Tailwind CSS)** Point of Sale (POS), Double-Entry Khata Ledger, Dynamic Sales Tax Calculator, and **Punjab Revenue Authority (PRA) e-IMS** fiscal billing system designed for hybrid **Desi Restaurant & Retail Counter** operations.
-
----
-
-## Key Features
-
-- **Hybrid POS Terminal (Restaurant + Retail)**
-  - Supports **Dine-In** (Table & Waiter assignment + Kitchen Station KOT), **Takeaway**, **Delivery**, and **Retail Counter** (Barcode / SKU scanning).
-  - Menu cards with customizable product images, portion/variant selectors (*Full 1 Kg, Half 500g, Gift Box, Plate*), and quick chef notes.
-- **Dynamic Sales Tax Calculator & PRA e-IMS Integration**
-  - Automatically recalculates Punjab Revenue Authority GST by payment method (**16% Cash GST** vs. **5% Bank Card / Digital GST**, or proportional **Split Bill**).
-  - Supports **Tax-Exclusive**, **Tax-Inclusive**, and **Tax-Exempt** items.
-  - Generates official **PRA Fiscal Invoice Numbers**, verification **QR codes**, **80mm Thermal Receipts**, **Kitchen Order Tickets (KOT)**, and monthly **PRA Return CSV exports**.
-- **Double-Entry Khata & Ledger**
-  - Track **Customer Credit Accounts (Receivables)**, **Supplier Payables** (*Meat, Poultry, Flour/Grocery vendors*), and **Daily Cash Drawer (Galla) Vouchers**.
-- **HS256 JWT + OAuth 2.0 Ready Authentication & Single-Active-Session Lock**
-  - Enforces **strictly one active logged-in profile at a time** via HTTP-Only signed `HS256` JWT cookies and a server-side session lock with full security audit logging.
-- **Dual-Mode Database (Local JSON + MongoDB Ready)**
-  - Works out-of-the-box with zero configuration using local persistence (`data/albarka-db.json`), and connects to **MongoDB / MongoDB Atlas** via the built-in Database Settings panel.
+A full-stack **Next.js (App Router) + TypeScript + MongoDB** Enterprise Resource Planning (ERP), Point of Sale (POS), Invoicing, Double-Entry Khata Accounting, and **Punjab Revenue Authority (PRA) e-IMS** system built with **Google Material Design 3 (Material You)**.
 
 ---
 
-## Default Staff Profiles & PINs
+## 1. Material 3 Design Tokens (`src/app/globals.css`)
 
-| Role | Name | Default PIN | Access Level |
-| :--- | :--- | :---: | :--- |
-| **ADMIN** | Haji Tariq Mahmood | `1111` | Full access to POS, PRA API Settings, Tax Rates, Menu Photos/Pricing, Discounts, Khata & Z-Report |
-| **MANAGER** | Usman Ali Cheema | `2222` | Access to POS, Discounts, Menu/Photos, Khata & Z-Report (PRA fiscal settings read-only) |
-| **CASHIER** | Umar Farooq | `3333` | POS Terminal & Billing only |
+All surfaces, tonal containers, outlines, and semantic states are driven by CSS variables mapped into the Tailwind v4 `@theme` layer—no hard-coded hex colors appear inside components:
+
+| Token | CSS Variable | Utility Class (`bg-*` / `text-*` / `border-*`) | Role |
+| :--- | :--- | :--- | :--- |
+| **Primary** | `--md-primary` (`#36618E`) | `bg-md-primary` / `text-md-on-primary` | Filled CTA buttons, active focus borders, brand tile |
+| **Primary Container** | `--md-primary-container` (`#D1E4FF`) | `bg-md-primary-container` / `text-md-on-primary-container` | Extended FAB (`Create`), icon tiles, `Sent` status chips |
+| **Secondary Container** | `--md-secondary-container` (`#D7E3F7`) | `bg-md-secondary-container` / `text-md-on-secondary-container` | Active navigation pill, selected `FilterChip` & `SegmentedButton` |
+| **Tertiary** | `--md-tertiary` (`#6B5778`) | `bg-md-tertiary` | User initials avatars |
+| **Surface** | `--md-surface` (`#F8F9FF`) | `bg-md-surface` / `text-md-on-surface` | App canvas |
+| **Surface Container Low** | `--md-surface-container-low` (`#F2F3FA`) | `bg-md-surface-container-low` | Navigation drawer (`264px`), tonal summary cards |
+| **Surface Container Lowest** | `--md-surface-container-lowest` (`#FFFFFF`) | `bg-md-surface-container-lowest` | Outlined cards (`16px` radius + `1px` `--md-outline-variant` border) |
+| **Semantic Containers** | `--md-success-container`, `--md-warning-container`, `--md-error-container` | `bg-md-success-container`, `bg-md-warning-container`, `bg-md-error-container` | `StatusChip` & KPI summary tiles (`Paid`, `Pending`, `Overdue`) |
+
+*(Dark theme variables are pre-configured under `[data-theme="dark"]` in `src/app/globals.css`.)*
 
 ---
 
-## Getting Started
+## 2. Reusable Material 3 Component Library (`src/components/ui/m3.tsx`)
 
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+- **`Button`**: Variants `filled`, `tonal`, `outlined`, `text`, `icon` (pill-shaped `rounded-full`).
+- **`ExtendedFab`**: `16px` radius (`rounded-2xl`), `primary-container` fill, soft shadow.
+- **`NavItem`**: `56px` tall pill with icon, label, optional count badge, and `aria-current="page"`.
+- **`SearchBar`**: `56px` tall pill in `surface-container-high` with `Ctrl K` hint chip that triggers the `CommandPalette` dialog.
+- **`Card` & `StatCard`**: `16px` radius flat cards (`outlined` or `tonal`) and KPI cards with `40px` tonal icon tiles and `32/40` `tabular-nums` values.
+- **`StatusChip` & `FilterChip`**: `8px` radius chips; `FilterChip` displays a check icon when selected.
+- **`SegmentedButton`**: Pill group with check icon on the active segment.
+- **`OutlinedTextField`**: Material 3 notched top-border floating label (`4px` radius), `2px` primary focus border, helper/error text, and support for `select`, `date`, and `multiline`.
+- **`Switch`**: Material 3 `52×32px` track where the thumb grows from `16px` to `24px` and displays a check icon when `checked` (`role="switch"` + `aria-checked`).
+- **`ProgressBar`**: `6px` rounded bar colored automatically by stock ratio (`<15%` error, `<35%` warning, else primary).
 
-2. **Run the development server:**
-   ```bash
-   npm run dev
-   ```
+---
 
-3. **Open in browser:**
-   Navigate to `http://localhost:3000`.
+## 3. How to Add a New Page Using the Shell & Components
+
+1. Register the navigation entry and required `ERPPermission` in `src/lib/nav.ts` (`ERP_NAVIGATION_ITEMS`).
+2. Create your view component under `src/components/<module>/` using `PageHeader`, `Card`, `StatCard`, `FilterChip`, `OutlinedTextField`, and `Button` from `@/components/ui/m3`.
+3. Add a route file under `src/app/<module>/page.tsx` rendering `<AlbarkaMaterial3ERP defaultNav="<module>" />`.
+
+---
+
+## 4. Running Locally
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000` (or `/dashboard`, `/invoices`, `/invoices/new`). Default PINs: **Admin** (`1111`), **Manager** (`2222`), **Cashier** (`3333`).

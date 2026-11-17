@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Store,
 } from "lucide-react";
+import { Avatar, Button, Card, StatusChip } from "@/components/ui/m3";
 
 interface AuthScreenProps {
   users: UserProfile[];
@@ -99,54 +100,53 @@ export default function AuthScreen({
   }
 
   return (
-    <div className="min-h-screen bg-[#edf2f4] flex items-center justify-center p-6">
-      <div className="max-w-5xl w-full bg-white border border-[#d4dce4] rounded-2xl shadow-lg overflow-hidden grid grid-cols-1 lg:grid-cols-12">
+    <div className="min-h-screen bg-md-surface flex items-center justify-center p-4 sm:p-8">
+      <div className="max-w-5xl w-full bg-md-surface-container-lowest border border-md-outline-variant rounded-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12">
         {/* Left 7 Cols: Profile Selection + Single-Session Status */}
-        <div className="lg:col-span-7 p-8 lg:p-10 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-[#d4dce4]">
+        <div className="lg:col-span-7 p-6 sm:p-10 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-md-divider">
           <div>
-            {/* Brand Header */}
-            <div className="flex items-center gap-4 mb-7">
-              <div className="w-12 h-12 rounded-xl bg-[#ef233c] text-white flex items-center justify-center shadow-xs">
-                <Store className="w-6 h-6" />
+            {/* Brand Row */}
+            <div className="flex items-center gap-4 mb-8">
+              <div className="w-12 h-12 rounded-2xl bg-md-primary text-md-on-primary flex items-center justify-center font-bold text-xl">
+                A
               </div>
               <div>
                 <div className="flex items-center gap-2.5">
-                  <h1 className="text-xl font-bold text-[#2b2d42] tracking-tight">
-                    Albarka Restaurant & Retail
+                  <h1 className="text-[22px] leading-[28px] font-normal text-md-on-surface">
+                    Albarka ERP & POS
                   </h1>
-                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-md bg-[#2b2d42] text-white">
-                    Hybrid POS
-                  </span>
+                  <StatusChip label="Material 3" variant="primary" />
                 </div>
-                <p className="text-sm text-[#4a4e69] mt-1">
-                  HS256 JWT Auth • OAuth 2.0 Ready • Single-Active-Session Lock
+                <p className="text-sm text-md-on-surface-variant mt-0.5">
+                  HS256 JWT Session · OAuth 2.0 Ready · Single-Active-Session Lock
                 </p>
               </div>
             </div>
 
             {/* Active Single-Session Lock Banner */}
             {conflictSession && (
-              <div className="mb-6 p-4 rounded-xl bg-[#fff5f6] border border-[#ef233c] space-y-2.5">
+              <div className="mb-6 p-4 rounded-2xl bg-md-error-container text-md-on-error-container space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#d80032] flex items-center gap-1.5">
-                    <AlertTriangle className="w-4 h-4" />
+                  <span className="text-xs font-semibold flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4" strokeWidth={1.8} />
                     SINGLE-PROFILE SESSION LOCK ACTIVE
                   </span>
-                  <span className="text-xs font-mono font-semibold px-2.5 py-0.5 rounded bg-[#2b2d42] text-white">
+                  <span className="text-xs font-mono font-medium px-2.5 py-0.5 rounded-lg bg-md-surface-container-lowest text-md-on-surface">
                     {conflictSession.sessionId}
                   </span>
                 </div>
-                <p className="text-sm text-[#2b2d42] leading-relaxed">
-                  Only <strong>one profile</strong> can be logged in at a single time. The terminal
-                  is currently locked by{" "}
+                <p className="text-sm leading-relaxed">
+                  Only <strong>one profile</strong> can be logged in at a single time. Currently
+                  locked by{" "}
                   <strong>
                     {conflictSession.userName} ({conflictSession.userRole})
                   </strong>
                   .
                 </p>
-                <div className="flex flex-wrap gap-2.5 pt-1">
-                  <button
-                    type="button"
+                <div className="flex flex-wrap gap-2.5">
+                  <Button
+                    variant="tonal"
+                    size="sm"
                     onClick={() => {
                       const lockedUser = users.find((u) => u.id === conflictSession.userId);
                       if (lockedUser) {
@@ -154,25 +154,24 @@ export default function AuthScreen({
                         submitLogin(lockedUser, lockedUser.pin, "JWT_PIN", false);
                       }
                     }}
-                    className="px-3.5 py-2 rounded-lg bg-[#2b2d42] text-white text-xs font-semibold hover:opacity-90"
                   >
                     Resume {conflictSession.userName}&apos;s Session
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="filled"
+                    size="sm"
                     onClick={() =>
                       submitLogin(selectedUser, selectedUser.pin, "JWT_PIN", true)
                     }
-                    className="px-3.5 py-2 rounded-lg bg-[#ef233c] hover:bg-[#d80032] text-white text-xs font-semibold"
                   >
                     Force Revoke & Sign In as {selectedUser.role}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
 
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-[#4a4e69] mb-3">
-              Select Authorized Profile (One Active Session Allowed)
+            <h2 className="text-xs font-medium uppercase tracking-wider text-md-on-surface-variant mb-3">
+              Select Authorized Workspace Profile
             </h2>
 
             {/* Profile Cards */}
@@ -189,45 +188,47 @@ export default function AuthScreen({
                       setPinInput("");
                       setError("");
                     }}
-                    className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                    className={`p-4 rounded-2xl border cursor-pointer transition flex items-center justify-between ${
                       isSelected
-                        ? "border-[#ef233c] bg-[#f8fafc] ring-1 ring-[#ef233c]"
-                        : "border-[#d4dce4] hover:border-[#2b2d42] bg-white"
+                        ? "border-2 border-md-primary bg-md-primary-container/25"
+                        : "border-md-outline-variant hover:bg-md-surface-container-low"
                     }`}
                   >
                     <div className="flex items-center gap-3.5">
-                      <div
-                        className={`w-11 h-11 rounded-xl font-bold text-sm flex items-center justify-center text-white ${
-                          isSelected ? "bg-[#ef233c]" : "bg-[#2b2d42]"
-                        }`}
-                      >
-                        {u.avatarInitials}
-                      </div>
+                      <Avatar
+                        initials={u.avatarInitials}
+                        variant={isSelected ? "primary" : "tertiary"}
+                      />
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-[#2b2d42] text-base">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-md-on-surface text-base">
                             {u.name}
                           </span>
-                          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-md bg-[#2b2d42] text-white">
-                            {u.role}
-                          </span>
+                          <StatusChip
+                            label={u.role}
+                            variant={
+                              u.role === "ADMIN"
+                                ? "primary"
+                                : u.role === "MANAGER"
+                                ? "success"
+                                : "neutral"
+                            }
+                          />
                           {isCurrentlyLockedUser && (
-                            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-md bg-[#ef233c] text-white">
-                              Active Holder
-                            </span>
+                            <StatusChip label="Active Holder" variant="warning" />
                           )}
                         </div>
-                        <div className="text-sm text-[#4a4e69] mt-0.5">
-                          {u.title} • Default PIN:{" "}
-                          <code className="font-mono font-semibold text-[#2b2d42] bg-[#edf2f4] px-2 py-0.5 rounded">
+                        <div className="text-sm text-md-on-surface-variant mt-0.5">
+                          {u.title} · Default PIN:{" "}
+                          <code className="font-mono font-medium text-md-on-surface bg-md-surface-container-high px-2 py-0.5 rounded">
                             {u.pin}
                           </code>
                         </div>
                       </div>
                     </div>
 
-                    <span className="text-sm font-semibold text-[#ef233c]">
-                      {isSelected ? "Selected" : "Select →"}
+                    <span className="text-xs font-medium text-md-primary">
+                      {isSelected ? "Selected" : "Select"}
                     </span>
                   </div>
                 );
@@ -236,53 +237,53 @@ export default function AuthScreen({
           </div>
 
           {/* Role Capabilities Box */}
-          <div className="mt-6 p-4 rounded-xl bg-[#f4f7f9] border border-[#d4dce4] text-sm space-y-1.5">
-            <div className="font-semibold text-[#2b2d42] flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-[#ef233c]" />
-              {selectedUser.role} Profile Permissions:
+          <Card variant="tonal" className="mt-6 p-4! space-y-1.5">
+            <div className="text-sm font-medium text-md-on-surface flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-md-primary" strokeWidth={1.8} />
+              {selectedUser.role} RBAC Module Permissions:
             </div>
-            <div className="grid grid-cols-2 gap-1.5 text-xs text-[#4a4e69] pt-1">
+            <div className="grid grid-cols-2 gap-1.5 text-xs text-md-on-surface-variant pt-1">
               <span>
                 • PRA Config & Tax Rates:{" "}
-                <strong className={selectedUser.permissions.canEditPraSettings ? "text-[#2b2d42]" : "text-[#d80032]"}>
+                <strong className="text-md-on-surface">
                   {selectedUser.permissions.canEditPraSettings ? "Full Admin" : "Read-Only"}
                 </strong>
               </span>
               <span>
                 • Menu & Stock Editing:{" "}
-                <strong className="text-[#2b2d42]">
+                <strong className="text-md-on-surface">
                   {selectedUser.permissions.canManageMenuPricing ? "Allowed" : "Restricted"}
                 </strong>
               </span>
               <span>
                 • Bill Discounts:{" "}
-                <strong className="text-[#2b2d42]">
+                <strong className="text-md-on-surface">
                   {selectedUser.permissions.canApproveDiscounts ? "Allowed" : "Manager PIN"}
                 </strong>
               </span>
               <span>
-                • Khata & Z-Report:{" "}
-                <strong className="text-[#2b2d42]">
+                • Invoices, Khata & Reports:{" "}
+                <strong className="text-md-on-surface">
                   {selectedUser.permissions.canManageKhata ? "Full Access" : "POS Only"}
                 </strong>
               </span>
             </div>
-          </div>
+          </Card>
         </div>
 
-        {/* Right 5 Cols: JWT PIN Keypad + OAuth 2.0 SSO */}
-        <div className="lg:col-span-5 bg-[#2b2d42] text-white p-8 flex flex-col justify-center">
+        {/* Right 5 Cols: Material 3 Tonal PIN Keypad + OAuth 2.0 SSO */}
+        <div className="lg:col-span-5 bg-md-surface-container-low p-6 sm:p-10 flex flex-col justify-center">
           <form onSubmit={handlePinSubmit} className="space-y-5 max-w-xs mx-auto w-full">
             <div className="text-center">
-              <div className="w-11 h-11 rounded-xl bg-[#ef233c] text-white flex items-center justify-center mx-auto mb-2.5">
-                <KeyRound className="w-5 h-5" />
+              <div className="w-12 h-12 rounded-2xl bg-md-primary-container text-md-on-primary-container flex items-center justify-center mx-auto mb-3">
+                <KeyRound className="w-5 h-5" strokeWidth={1.8} />
               </div>
-              <h3 className="font-bold text-white text-lg">
-                JWT Session Sign-In
+              <h3 className="text-[22px] leading-[28px] font-normal text-md-on-surface">
+                Workspace Sign-In
               </h3>
-              <p className="text-sm text-[#cbd5e1] mt-1">
-                Profile: <strong className="text-white">{selectedUser.name}</strong> (PIN:{" "}
-                <span className="font-mono font-semibold text-[#ef233c]">{selectedUser.pin}</span>)
+              <p className="text-sm text-md-on-surface-variant mt-1">
+                Profile: <strong className="text-md-on-surface">{selectedUser.name}</strong> (PIN:{" "}
+                <span className="font-mono font-medium text-md-primary">{selectedUser.pin}</span>)
               </p>
             </div>
 
@@ -291,10 +292,10 @@ export default function AuthScreen({
               {[0, 1, 2, 3].map((idx) => (
                 <div
                   key={idx}
-                  className={`w-12 h-12 rounded-xl border flex items-center justify-center text-lg font-bold transition ${
+                  className={`w-12 h-12 rounded-xl border flex items-center justify-center text-lg font-medium transition ${
                     pinInput.length > idx
-                      ? "border-[#ef233c] bg-[#ef233c] text-white"
-                      : "border-white/20 bg-white/10 text-white/50"
+                      ? "border-md-primary bg-md-primary-container text-md-on-primary-container"
+                      : "border-md-outline-variant bg-md-surface-container-lowest text-md-on-surface-variant"
                   }`}
                 >
                   {pinInput.length > idx ? "•" : ""}
@@ -303,7 +304,7 @@ export default function AuthScreen({
             </div>
 
             {error && (
-              <div className="p-3 rounded-xl bg-[#d80032] text-white text-xs text-center font-medium leading-relaxed">
+              <div className="p-3 rounded-xl bg-md-error-container text-md-on-error-container text-xs text-center font-medium leading-relaxed">
                 {error}
               </div>
             )}
@@ -316,7 +317,7 @@ export default function AuthScreen({
                   type="button"
                   disabled={loading}
                   onClick={() => handleKeypadPress(digit)}
-                  className="h-12 rounded-xl bg-white/10 hover:bg-[#ef233c] border border-white/15 font-mono font-semibold text-base text-white transition"
+                  className="h-12 rounded-full bg-md-surface-container-lowest hover:bg-md-secondary-container border border-md-outline-variant font-mono font-medium text-base text-md-on-surface transition"
                 >
                   {digit}
                 </button>
@@ -324,50 +325,50 @@ export default function AuthScreen({
               <button
                 type="button"
                 onClick={() => handleKeypadPress("CLEAR")}
-                className="h-12 rounded-xl bg-[#d80032]/50 hover:bg-[#d80032] border border-[#ef233c]/40 font-semibold text-xs text-white transition"
+                className="h-12 rounded-full bg-md-error-container hover:opacity-90 font-medium text-xs text-md-on-error-container transition"
               >
                 Clear
               </button>
               <button
                 type="button"
                 onClick={() => handleKeypadPress("0")}
-                className="h-12 rounded-xl bg-white/10 hover:bg-[#ef233c] border border-white/15 font-mono font-semibold text-base text-white transition"
+                className="h-12 rounded-full bg-md-surface-container-lowest hover:bg-md-secondary-container border border-md-outline-variant font-mono font-medium text-base text-md-on-surface transition"
               >
                 0
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="h-12 rounded-xl bg-[#ef233c] hover:bg-[#d80032] text-white font-semibold text-sm transition"
+                className="h-12 rounded-full bg-md-primary hover:bg-md-primary-strong text-md-on-primary font-medium text-sm transition"
               >
                 {loading ? "..." : "Sign In"}
               </button>
             </div>
 
             {/* OAuth 2.0 / SSO Button + Quick PIN Login */}
-            <div className="space-y-2.5 pt-3 border-t border-white/15">
-              <button
-                type="button"
+            <div className="space-y-2.5 pt-3 border-t border-md-divider">
+              <Button
+                variant="outlined"
+                className="w-full"
                 disabled={loading}
+                icon={<Lock className="w-4 h-4" strokeWidth={1.8} />}
                 onClick={() =>
                   submitLogin(selectedUser, selectedUser.pin, "OAUTH_SSO", false)
                 }
-                className="w-full py-2.5 px-3 rounded-xl bg-white hover:bg-[#edf2f4] text-[#2b2d42] font-semibold text-xs transition flex items-center justify-center gap-2"
               >
-                <Lock className="w-3.5 h-3.5 text-[#ef233c]" />
-                Sign In with OAuth 2.0 ({selectedUser.email})
-              </button>
+                OAuth 2.0 SSO ({selectedUser.email})
+              </Button>
 
-              <button
-                type="button"
+              <Button
+                variant="filled"
+                className="w-full"
                 disabled={loading}
                 onClick={() =>
                   submitLogin(selectedUser, selectedUser.pin, "JWT_PIN", false)
                 }
-                className="w-full py-2.5 rounded-xl bg-[#ef233c] hover:bg-[#d80032] text-white font-semibold text-xs transition"
               >
-                Quick JWT Sign-In as {selectedUser.role} (PIN {selectedUser.pin})
-              </button>
+                Quick Sign-In as {selectedUser.role} (PIN {selectedUser.pin})
+              </Button>
             </div>
           </form>
         </div>

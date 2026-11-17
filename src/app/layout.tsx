@@ -1,10 +1,25 @@
 import type { Metadata } from "next";
+import { Roboto, Roboto_Mono } from "next/font/google";
 import "./globals.css";
 
+const roboto = Roboto({
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-roboto",
+  display: "swap",
+});
+
+const robotoMono = Roboto_Mono({
+  subsets: ["latin"],
+  weight: ["500"],
+  variable: "--font-roboto-mono",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "Albarka POS — Restaurant & Retail ERP",
+  title: "Albarka ERP — Material 3 Enterprise Resource Planning & POS",
   description:
-    "Modern Hybrid Point of Sale for Albarka Restaurant & Retail Counter with PRA e-IMS Integration, Khata Ledger, and Role-Based Access.",
+    "Google Material Design 3 (Material You) ERP, Invoicing, Khata Accounting, Inventory & PRA POS built with Next.js App Router, TypeScript & MongoDB.",
 };
 
 export default function RootLayout({
@@ -13,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${roboto.variable} ${robotoMono.variable}`}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
@@ -22,11 +37,11 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
         <link
-          href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Poppins:wght@400;500;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&family=Roboto:wght@400;500;600;700&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-screen bg-[#edf2f4] text-[#2b2d42] selection:bg-[#ef233c] selection:text-white">
+      <body className="min-h-screen bg-md-surface text-md-on-surface font-sans antialiased selection:bg-md-primary selection:text-md-on-primary">
         {children}
       </body>
     </html>

@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { Order, PRAConfig } from "@/lib/types";
 import { buildPRAPayload } from "@/lib/pra-client";
 import { CheckCircle2, Code2, Printer, Receipt, Utensils, X } from "lucide-react";
+import { Button, SegmentedButton, StatusChip } from "@/components/ui/m3";
 
 interface ReceiptModalProps {
   order: Order | null;
@@ -52,13 +53,20 @@ function PRAQrMatrix({ value }: { value: string }) {
   return (
     <svg
       viewBox={`0 0 ${size} ${size}`}
-      className="w-28 h-28 mx-auto border-2 border-black p-1 bg-white"
+      className="w-28 h-28 mx-auto border-2 border-md-on-surface p-1 bg-md-surface-container-lowest"
       shapeRendering="crispEdges"
     >
       {cells.map((row, rIdx) =>
         row.map((filled, cIdx) =>
           filled ? (
-            <rect key={`${rIdx}-${cIdx}`} x={cIdx} y={rIdx} width={1} height={1} fill="#000000" />
+            <rect
+              key={`${rIdx}-${cIdx}`}
+              x={cIdx}
+              y={rIdx}
+              width={1}
+              height={1}
+              fill="currentColor"
+            />
           ) : null
         )
       )}
@@ -83,100 +91,73 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
   }, {});
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#2b2d42]/75 p-4">
-      <div className="bg-white border border-[#d4dce4] rounded-2xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
-        {/* Top Modal Controls */}
-        <div className="flex items-center justify-between px-6 py-4 bg-[#2b2d42] text-white">
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-md-on-surface/40 p-4"
+    >
+      <div className="bg-md-surface-container-lowest border border-md-outline-variant rounded-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+        {/* Top Modal Header */}
+        <div className="flex items-center justify-between px-6 py-4 bg-md-surface-container-low border-b border-md-divider">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-[#ef233c] text-white flex items-center justify-center">
-              <CheckCircle2 className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-full bg-md-primary-container text-md-on-primary-container flex items-center justify-center">
+              <CheckCircle2 className="w-5 h-5" strokeWidth={1.8} />
             </div>
             <div>
-              <div className="font-bold text-white text-sm flex items-center gap-2">
-                Invoice Fiscalized — {order.invoiceNumber}
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#ef233c] text-white font-semibold">
-                  PRA Verified
-                </span>
+              <div className="font-medium text-md-on-surface text-base flex items-center gap-2">
+                <span>Invoice {order.invoiceNumber}</span>
+                <StatusChip label="PRA Fiscalized" variant="success" />
               </div>
-              <div className="text-xs text-[#cbd5e1]">
+              <div className="text-xs font-mono text-md-on-surface-variant">
                 PRA Fiscal Invoice #: {order.praInvoiceNumber}
               </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-[#cbd5e1] hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <Button variant="icon" aria-label="Close dialog" onClick={onClose}>
+            <X className="w-5 h-5" strokeWidth={1.8} />
+          </Button>
         </div>
 
         {/* View Switcher */}
-        <div className="flex items-center justify-between px-6 py-3 bg-white border-b border-[#d4dce4] gap-2 flex-wrap">
-          <div className="flex gap-1.5 bg-[#edf2f4] p-1 rounded-xl border border-[#d4dce4]">
-            <button
-              onClick={() => setActiveView("CUSTOMER_BILL")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeView === "CUSTOMER_BILL"
-                  ? "bg-[#2b2d42] text-white"
-                  : "text-[#2b2d42] hover:bg-white"
-              }`}
-            >
-              <Receipt className="w-3.5 h-3.5 text-[#ef233c]" />
-              80mm Customer Receipt
-            </button>
-            <button
-              onClick={() => setActiveView("KOT")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeView === "KOT"
-                  ? "bg-[#2b2d42] text-white"
-                  : "text-[#2b2d42] hover:bg-white"
-              }`}
-            >
-              <Utensils className="w-3.5 h-3.5 text-[#ef233c]" />
-              Kitchen KOT Slip
-            </button>
-            <button
-              onClick={() => setActiveView("PRA_JSON")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeView === "PRA_JSON"
-                  ? "bg-[#2b2d42] text-white"
-                  : "text-[#2b2d42] hover:bg-white"
-              }`}
-            >
-              <Code2 className="w-3.5 h-3.5 text-[#ef233c]" />
-              PRA e-IMS JSON
-            </button>
-          </div>
+        <div className="flex items-center justify-between px-6 py-3 bg-md-surface-container-lowest border-b border-md-divider gap-2 flex-wrap">
+          <SegmentedButton
+            value={activeView}
+            onChange={setActiveView}
+            options={[
+              { value: "CUSTOMER_BILL", label: "80mm Customer Receipt" },
+              { value: "KOT", label: "Kitchen KOT Slip" },
+              { value: "PRA_JSON", label: "PRA e-IMS JSON" },
+            ]}
+          />
 
-          <button
+          <Button
+            variant="filled"
+            icon={<Printer className="w-4 h-4" strokeWidth={1.8} />}
             onClick={() => window.print()}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#ef233c] hover:bg-[#d80032] text-white text-xs font-semibold transition"
           >
-            <Printer className="w-3.5 h-3.5" />
             Print 80mm Slip
-          </button>
+          </Button>
         </div>
 
         {/* Body */}
-        <div className="p-6 overflow-y-auto flex-1 flex justify-center bg-[#edf2f4]">
+        <div className="p-6 overflow-y-auto flex-1 flex justify-center bg-md-surface">
           {activeView === "CUSTOMER_BILL" && (
             <div
               id="printable-receipt"
-              className="w-[340px] bg-white text-black p-5 rounded-xl border border-[#d4dce4] shadow-md font-mono text-xs leading-relaxed"
+              className="w-[340px] bg-md-surface-container-lowest text-md-on-surface p-5 rounded-2xl border border-md-outline-variant font-mono text-xs leading-relaxed"
             >
-              <div className="text-center border-b-2 border-dashed border-black pb-3">
+              <div className="text-center border-b-2 border-dashed border-md-on-surface pb-3">
                 <div className="text-base font-bold tracking-tight">
                   {praConfig.restaurantName}
                 </div>
                 <div className="text-[11px] mt-1">{praConfig.branchName}</div>
-                <div className="text-[11px] mt-1 font-semibold">
+                <div className="text-[11px] mt-1 font-medium">
                   NTN: {praConfig.ntn} | STRN: {praConfig.strn}
                 </div>
                 <div className="text-[11px]">PRA POS ID: {praConfig.posId}</div>
               </div>
 
-              <div className="py-2.5 border-b border-dashed border-black text-[11px] space-y-0.5">
+              <div className="py-2.5 border-b border-dashed border-md-on-surface text-[11px] space-y-0.5">
                 <div className="flex justify-between">
                   <span>INV #: {order.invoiceNumber}</span>
                   <span className="font-bold">{order.orderType.replace("_", " ")}</span>
@@ -197,25 +178,18 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
                 </div>
               </div>
 
-              <div className="py-2 border-b border-dashed border-black">
-                <div className="flex justify-between font-bold border-b border-black pb-1 mb-1.5 text-[11px]">
+              <div className="py-2 border-b border-dashed border-md-on-surface">
+                <div className="flex justify-between font-bold border-b border-md-on-surface pb-1 mb-1.5 text-[11px]">
                   <span>ITEM / PORTION</span>
                   <span>QTY x RATE = TOTAL</span>
                 </div>
                 <div className="space-y-2">
                   {order.items.map((item) => (
                     <div key={item.cartItemId} className="text-[11px]">
-                      <div className="font-semibold">{item.name}</div>
+                      <div className="font-medium">{item.name}</div>
                       <div className="flex justify-between text-[10px]">
-                        <span>
-                          [{item.variantName}]{" "}
-                          {item.taxMode === "INCLUSIVE"
-                            ? "(Tax Incl.)"
-                            : item.taxMode === "EXEMPT"
-                            ? "(Exempt)"
-                            : ""}
-                        </span>
-                        <span className="font-bold">
+                        <span>[{item.variantName}]</span>
+                        <span className="font-bold tabular-nums">
                           {item.quantity} x {item.unitPrice.toLocaleString()} ={" "}
                           {(item.quantity * item.unitPrice).toLocaleString()}
                         </span>
@@ -225,7 +199,7 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
                 </div>
               </div>
 
-              <div className="py-2.5 border-b-2 border-dashed border-black space-y-1 text-[11px]">
+              <div className="py-2.5 border-b-2 border-dashed border-md-on-surface space-y-1 text-[11px] tabular-nums">
                 <div className="flex justify-between">
                   <span>Gross Subtotal:</span>
                   <span>PKR {order.taxBreakdown.grossSubtotal.toLocaleString()}</span>
@@ -240,11 +214,11 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
                   <span>Taxable Value:</span>
                   <span>PKR {order.taxBreakdown.taxableAmount.toLocaleString()}</span>
                 </div>
-                <div className="flex justify-between font-semibold">
+                <div className="flex justify-between font-medium">
                   <span>PRA GST ({order.taxBreakdown.effectiveTaxRateLabel}):</span>
                   <span>PKR {order.taxBreakdown.totalSalesTax.toLocaleString()}</span>
                 </div>
-                <div className="flex justify-between text-sm font-bold border-t border-black pt-1.5 mt-1">
+                <div className="flex justify-between text-sm font-bold border-t border-md-on-surface pt-1.5 mt-1">
                   <span>NET PAYABLE:</span>
                   <span>PKR {order.taxBreakdown.grandTotal.toLocaleString()}</span>
                 </div>
@@ -254,14 +228,13 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
                 <div className="text-[11px] font-bold uppercase">
                   Punjab Revenue Authority (e-IMS)
                 </div>
-                <div className="bg-black text-white py-1 px-2 font-bold text-[11px] rounded">
+                <div className="bg-md-primary-container text-md-on-primary-container py-1 px-2 font-bold text-[11px] rounded">
                   PRA INV #: {order.praInvoiceNumber}
                 </div>
                 <div className="py-1.5">
                   <PRAQrMatrix value={order.praQrPayload} />
                 </div>
                 <div className="text-[10px]">Verify invoice online at e.pra.punjab.gov.pk</div>
-                <div className="text-[11px] font-bold pt-1">Thank You for Visiting Albarka!</div>
               </div>
             </div>
           )}
@@ -269,9 +242,9 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
           {activeView === "KOT" && (
             <div
               id="printable-receipt"
-              className="w-[340px] bg-white text-black p-5 rounded-xl border border-[#d4dce4] shadow-md font-mono text-xs"
+              className="w-[340px] bg-md-surface-container-lowest text-md-on-surface p-5 rounded-2xl border border-md-outline-variant font-mono text-xs"
             >
-              <div className="text-center border-b-2 border-black pb-2 mb-3">
+              <div className="text-center border-b-2 border-md-on-surface pb-2 mb-3">
                 <div className="text-base font-bold">KITCHEN ORDER TICKET (KOT)</div>
                 <div className="text-xs font-bold mt-0.5">
                   {order.orderType} — {order.tableNumber || "Counter"}
@@ -284,15 +257,18 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
 
               <div className="space-y-4">
                 {Object.entries(stationGroups).map(([station, items]) => (
-                  <div key={station} className="border border-black p-2 rounded">
-                    <div className="bg-black text-white px-2 py-0.5 font-bold text-[11px] mb-2">
+                  <div
+                    key={station}
+                    className="border border-md-outline-variant p-2.5 rounded-xl"
+                  >
+                    <div className="bg-md-secondary-container text-md-on-secondary-container px-2.5 py-1 font-bold text-[11px] rounded mb-2">
                       STATION: {station.replace("_", " ")}
                     </div>
                     <div className="space-y-2">
                       {items.map((item) => (
                         <div
                           key={item.cartItemId}
-                          className="border-b border-dashed border-black pb-1 last:border-b-0"
+                          className="border-b border-dashed border-md-outline-variant pb-1 last:border-b-0"
                         >
                           <div className="flex justify-between font-bold text-xs">
                             <span>
@@ -301,7 +277,7 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
                             <span>[{item.variantName}]</span>
                           </div>
                           {item.notes && (
-                            <div className="text-[11px] font-bold bg-gray-200 px-1.5 py-0.5 mt-0.5">
+                            <div className="text-[11px] font-medium bg-md-warning-container text-md-on-warning-container px-2 py-0.5 rounded mt-1">
                               * CHEF NOTE: {item.notes}
                             </div>
                           )}
@@ -315,19 +291,17 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
           )}
 
           {activeView === "PRA_JSON" && (
-            <div className="w-full">
-              <div className="mb-3 p-3.5 rounded-xl bg-white border border-[#d4dce4] text-xs text-[#2b2d42] flex items-center justify-between">
+            <div className="w-full space-y-3">
+              <div className="p-3.5 rounded-2xl bg-md-surface-container-lowest border border-md-outline-variant text-xs text-md-on-surface flex items-center justify-between">
                 <div>
-                  <span className="font-bold">Endpoint:</span>{" "}
-                  <code className="text-[#d80032] bg-[#edf2f4] px-1.5 py-0.5 rounded">
+                  <span className="font-medium">Endpoint:</span>{" "}
+                  <code className="text-md-primary bg-md-primary-container/40 px-2 py-0.5 rounded font-mono">
                     {praConfig.imsEndpointUrl}
                   </code>
                 </div>
-                <span className="px-2.5 py-1 rounded-full bg-[#2b2d42] text-white font-mono font-semibold">
-                  HTTP 200 (Code 100)
-                </span>
+                <StatusChip label="HTTP 200 (Code 100)" variant="success" />
               </div>
-              <pre className="bg-[#2b2d42] text-[#edf2f4] rounded-xl p-4 text-xs font-mono overflow-x-auto">
+              <pre className="bg-md-surface-container-low text-md-on-surface border border-md-outline-variant rounded-2xl p-4 text-xs font-mono overflow-x-auto">
                 {JSON.stringify(praPayload, null, 2)}
               </pre>
             </div>

@@ -1,16 +1,96 @@
 @import "tailwindcss";
 
 :root {
-  --space-indigo: #2b2d42;
-  --space-indigo-muted: #4a4e69;
-  --lavender-grey: #8d99ae;
-  --border-crisp: #d4dce4;
-  --platinum: #edf2f4;
-  --punch-red: #ef233c;
-  --classic-crimson: #d80032;
-  --font-poppins: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono-stack: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
-  --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
+  --md-primary: #36618E;
+  --md-on-primary: #FFFFFF;
+  --md-primary-container: #D1E4FF;
+  --md-on-primary-container: #001D36;
+  --md-primary-strong: #1F4A78;
+  --md-secondary-container: #D7E3F7;
+  --md-on-secondary-container: #101C2B;
+  --md-tertiary: #6B5778;
+  --md-tertiary-container: #F2DAFF;
+  --md-on-tertiary-container: #251431;
+  --md-error: #BA1A1A;
+  --md-error-container: #FFDAD6;
+  --md-on-error-container: #410002;
+  --md-success-container: #C8EFC0;
+  --md-on-success-container: #0E3B13;
+  --md-warning-container: #FFDEA6;
+  --md-on-warning-container: #261900;
+  --md-surface: #F8F9FF;
+  --md-on-surface: #191C20;
+  --md-surface-container-lowest: #FFFFFF;
+  --md-surface-container-low: #F2F3FA;
+  --md-surface-container-high: #E6E8EE;
+  --md-surface-variant: #E1E2E8;
+  --md-on-surface-variant: #43474E;
+  --md-outline: #73777F;
+  --md-outline-variant: #C3C7CF;
+  --md-divider: #E1E2E8;
+}
+
+[data-theme="dark"] {
+  --md-primary: #A0CAFD;
+  --md-on-primary: #003258;
+  --md-primary-container: #194975;
+  --md-on-primary-container: #D1E4FF;
+  --md-primary-strong: #C4E0FF;
+  --md-secondary-container: #3B4858;
+  --md-on-secondary-container: #D7E3F7;
+  --md-tertiary: #D6BEE4;
+  --md-tertiary-container: #523F5F;
+  --md-on-tertiary-container: #F2DAFF;
+  --md-error: #FFB4AB;
+  --md-error-container: #93000A;
+  --md-on-error-container: #FFDAD6;
+  --md-success-container: #1B5E20;
+  --md-on-success-container: #C8EFC0;
+  --md-warning-container: #5C4300;
+  --md-on-warning-container: #FFDEA6;
+  --md-surface: #111418;
+  --md-on-surface: #E1E2E8;
+  --md-surface-container-lowest: #0B0E13;
+  --md-surface-container-low: #191C20;
+  --md-surface-container-high: #272A2F;
+  --md-surface-variant: #43474E;
+  --md-on-surface-variant: #C3C7CF;
+  --md-outline: #8D9199;
+  --md-outline-variant: #43474E;
+  --md-divider: #2E3137;
+}
+
+@theme {
+  --color-md-primary: var(--md-primary);
+  --color-md-on-primary: var(--md-on-primary);
+  --color-md-primary-container: var(--md-primary-container);
+  --color-md-on-primary-container: var(--md-on-primary-container);
+  --color-md-primary-strong: var(--md-primary-strong);
+  --color-md-secondary-container: var(--md-secondary-container);
+  --color-md-on-secondary-container: var(--md-on-secondary-container);
+  --color-md-tertiary: var(--md-tertiary);
+  --color-md-tertiary-container: var(--md-tertiary-container);
+  --color-md-on-tertiary-container: var(--md-on-tertiary-container);
+  --color-md-error: var(--md-error);
+  --color-md-error-container: var(--md-error-container);
+  --color-md-on-error-container: var(--md-on-error-container);
+  --color-md-success-container: var(--md-success-container);
+  --color-md-on-success-container: var(--md-on-success-container);
+  --color-md-warning-container: var(--md-warning-container);
+  --color-md-on-warning-container: var(--md-on-warning-container);
+  --color-md-surface: var(--md-surface);
+  --color-md-on-surface: var(--md-on-surface);
+  --color-md-surface-container-lowest: var(--md-surface-container-lowest);
+  --color-md-surface-container-low: var(--md-surface-container-low);
+  --color-md-surface-container-high: var(--md-surface-container-high);
+  --color-md-surface-variant: var(--md-surface-variant);
+  --color-md-on-surface-variant: var(--md-on-surface-variant);
+  --color-md-outline: var(--md-outline);
+  --color-md-outline-variant: var(--md-outline-variant);
+  --color-md-divider: var(--md-divider);
+
+  --font-sans: var(--font-roboto), "Roboto", system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-roboto-mono), "Roboto Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 @layer base {
@@ -21,131 +101,79 @@
   }
 
   body {
-    background-color: var(--platinum);
-    color: var(--space-indigo);
-    font-family: var(--font-poppins);
+    background-color: var(--md-surface);
+    color: var(--md-on-surface);
+    font-family: var(--font-sans);
     line-height: 1.5;
-    letter-spacing: -0.01em;
   }
 
   .font-mono,
+  .tabular-nums,
   input[type="number"],
   table td,
   table th {
     font-variant-numeric: tabular-nums;
   }
 
-  /* Global pointer cursor & smooth transitions on all interactive controls */
   button,
   select,
   a,
   summary,
   [role="button"],
+  [role="switch"],
   input[type="checkbox"],
   input[type="radio"],
   input[type="range"],
   input[type="file"],
   label {
     cursor: pointer;
-    transition: all 240ms var(--ease-fluid);
+    transition: all 180ms cubic-bezier(0.2, 0, 0, 1);
   }
 
-  button:disabled,
-  input:disabled,
-  select:disabled {
-    cursor: not-allowed;
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 
-  input,
-  select {
-    font-family: inherit;
-    transition: border-color 220ms var(--ease-fluid), box-shadow 220ms var(--ease-fluid), background-color 220ms var(--ease-fluid);
-  }
-
-  input:focus,
-  select:focus {
-    box-shadow: 0 0 0 3px rgba(239, 35, 60, 0.12);
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--md-primary);
+    outline-offset: 2px;
   }
 }
 
-/* Standard Elevated Container Card */
-.pos-card {
-  background: #ffffff;
-  border: 1px solid #d4dce4;
-  box-shadow: 0 2px 6px rgba(43, 45, 66, 0.04);
-  transition: box-shadow 280ms var(--ease-fluid), border-color 280ms var(--ease-fluid);
-}
-
-/* Interactive Menu Item Card with Animated Top Accent Bar & Ambient Elevation */
-.pos-menu-card {
+/* Material 3 State Layer Utilities */
+.m3-state-layer {
   position: relative;
-  overflow: hidden;
-  background: #ffffff;
-  border: 1px solid #d4dce4;
-  box-shadow: 0 2px 6px rgba(43, 45, 66, 0.04);
-  cursor: pointer;
-  transition:
-    box-shadow 340ms var(--ease-fluid),
-    border-color 340ms var(--ease-fluid),
-    background-color 340ms var(--ease-fluid);
+}
+.m3-state-layer:hover {
+  background-color: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+.m3-state-layer:active {
+  background-color: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
 }
 
-.pos-menu-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: linear-gradient(90deg, #ef233c 0%, #d80032 50%, #2b2d42 100%);
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform 360ms var(--ease-fluid);
-  z-index: 20;
-}
-
-.pos-menu-card:hover {
-  border-color: rgba(239, 35, 60, 0.45);
-  background: linear-gradient(180deg, #ffffff 0%, #fcfdfe 100%);
-  box-shadow:
-    0 16px 32px -8px rgba(43, 45, 66, 0.12),
-    0 6px 16px -4px rgba(239, 35, 60, 0.1);
-}
-
-.pos-menu-card:hover::before {
-  transform: scaleX(1);
-}
-
-/* Smooth Tab / Section Entrance Animation */
-@keyframes panelEnter {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-panel {
-  animation: panelEnter 280ms var(--ease-fluid) forwards;
-}
-
-/* Clean Scrollbar */
+/* Scrollbar */
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #e2e8f0;
+  background: var(--md-surface-container-low);
 }
 ::-webkit-scrollbar-thumb {
-  background: #8d99ae;
+  background: var(--md-outline-variant);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2b2d42;
+  background: var(--md-outline);
 }
 
 /* 80mm Thermal Receipt Print Styles */
@@ -162,10 +190,10 @@
     left: 0;
     top: 0;
     width: 80mm;
-    background: #ffffff !important;
-    color: #000000 !important;
+    background: var(--md-surface-container-lowest) !important;
+    color: var(--md-on-surface) !important;
     padding: 4mm;
-    font-family: "Courier New", Courier, monospace;
+    font-family: var(--font-mono);
     box-shadow: none !important;
     border: none !important;
   }
