@@ -105,50 +105,52 @@ function SelectMenuPortal({
         width: coords.width,
         transform: coords.openUpward ? "translateY(-100%)" : undefined,
       }}
-      className="z-50 max-h-64 overflow-y-auto rounded-2xl bg-md-surface-container-lowest p-1.5 border border-md-outline-variant/40 shadow-[var(--md-card-shadow-hover)]"
+      className="z-50 rounded-2xl overflow-hidden bg-md-surface-container-lowest p-1.5 border border-md-outline-variant/40 shadow-[var(--md-card-shadow-hover)]"
     >
-      {placeholderOption && (
-        <div className="px-3 py-1.5 text-[11px] font-medium text-md-on-surface-variant select-none">
-          {placeholderOption}
-        </div>
-      )}
-      {options.length === 0 ? (
-        <div className="px-3 py-2 text-xs text-md-on-surface-variant">
-          No options available
-        </div>
-      ) : (
-        options.map((opt, idx) => {
-          const isSelected = opt.value === selectedValue;
-          const isHighlighted = idx === highlightedIndex;
-          return (
-            <button
-              key={opt.value}
-              type="button"
-              role="option"
-              aria-selected={isSelected}
-              onMouseEnter={() => onHoverIndex(idx)}
-              onClick={() => onSelect(opt.value)}
-              className={`border-0 w-full px-3 py-2 rounded-xl text-left text-sm flex items-center justify-between gap-2 transition-colors duration-150 ${
-                mono ? "font-mono text-xs" : ""
-              } ${
-                isSelected
-                  ? "bg-md-secondary-container text-md-on-secondary-container font-medium"
-                  : isHighlighted
-                  ? "bg-md-surface-container-high/75 text-md-on-surface"
-                  : "bg-transparent text-md-on-surface hover:bg-md-surface-container-low"
-              }`}
-            >
-              <span className="truncate">{opt.label}</span>
-              {isSelected && (
-                <Check
-                  className="w-4 h-4 shrink-0 text-md-primary"
-                  strokeWidth={2.2}
-                />
-              )}
-            </button>
-          );
-        })
-      )}
+      <div className="max-h-60 overflow-y-auto pr-0.5 space-y-0.5">
+        {placeholderOption && (
+          <div className="px-3 py-1.5 text-[11px] font-medium text-md-on-surface-variant select-none">
+            {placeholderOption}
+          </div>
+        )}
+        {options.length === 0 ? (
+          <div className="px-3 py-2 text-xs text-md-on-surface-variant">
+            No options available
+          </div>
+        ) : (
+          options.map((opt, idx) => {
+            const isSelected = opt.value === selectedValue;
+            const isHighlighted = idx === highlightedIndex;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onMouseEnter={() => onHoverIndex(idx)}
+                onClick={() => onSelect(opt.value)}
+                className={`border-0 w-full px-3 py-2 rounded-xl text-left text-sm flex items-center justify-between gap-2 transition-colors duration-150 ${
+                  mono ? "font-mono text-xs" : ""
+                } ${
+                  isSelected
+                    ? "bg-md-secondary-container text-md-on-secondary-container font-medium"
+                    : isHighlighted
+                    ? "bg-md-surface-container-high/75 text-md-on-surface"
+                    : "bg-transparent text-md-on-surface hover:bg-md-surface-container-low"
+                }`}
+              >
+                <span className="truncate">{opt.label}</span>
+                {isSelected && (
+                  <Check
+                    className="w-4 h-4 shrink-0 text-md-primary"
+                    strokeWidth={2.2}
+                  />
+                )}
+              </button>
+            );
+          })
+        )}
+      </div>
     </div>,
     document.body
   );
