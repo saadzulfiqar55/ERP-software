@@ -31,6 +31,9 @@ import {
   ActiveSession,
   BusinessSegment,
   CartItem,
+  CashierShift,
+  FiscalPeriod,
+  ImmutableAuditLog,
   LedgerEntry,
   MongoDBConfig,
   Order,
@@ -111,6 +114,7 @@ export default function AlbarkaModernPOS() {
     | "SESSION_JWT_MANAGER"
     | "MONGODB_DATABASE"
     | "RESTAURANT_PROFILES"
+    | "ERP_AUDIT_COMPLIANCE"
   >("PRA_INTEGRATION");
 
   // Persistent App Data State
@@ -125,6 +129,10 @@ export default function AlbarkaModernPOS() {
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
   const [parties, setParties] = useState<PartyAccount[]>(INITIAL_PARTIES);
   const [ledger, setLedger] = useState<LedgerEntry[]>(INITIAL_LEDGER);
+  const [immutableAuditLogs, setImmutableAuditLogs] = useState<ImmutableAuditLog[]>([]);
+  const [cashierShifts, setCashierShifts] = useState<CashierShift[]>([]);
+  const [fiscalPeriods, setFiscalPeriods] = useState<FiscalPeriod[]>([]);
+  const [countedCashInput, setCountedCashInput] = useState<string>("");
   const [savedBanner, setSavedBanner] = useState<string>("");
 
   // POS Filters & Search
@@ -252,6 +260,9 @@ export default function AlbarkaModernPOS() {
           setParties(data.parties);
           setLedger(data.ledger);
           if (data.users) setUsers(data.users);
+          if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
+          if (data.cashierShifts) setCashierShifts(data.cashierShifts);
+          if (data.fiscalPeriods) setFiscalPeriods(data.fiscalPeriods);
         }
         if (authRes.ok) {
           const authData = await authRes.json();
@@ -468,6 +479,7 @@ export default function AlbarkaModernPOS() {
         : undefined;
 
     const payload = {
+      idempotencyKey: `pos-sale-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       orderType,
       tableNumber: orderType === "DINE_IN" ? tableNumber : undefined,
       waiterName: orderType === "DINE_IN" ? waiterName : undefined,
@@ -493,16 +505,20 @@ export default function AlbarkaModernPOS() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      const data = await res.json();
       if (res.ok) {
-        const data = await res.json();
         setOrders(data.db.orders);
         setProducts(data.db.products);
         setParties(data.db.parties);
         setLedger(data.db.ledger);
+        if (data.db.immutableAuditLogs) setImmutableAuditLogs(data.db.immutableAuditLogs);
+        if (data.db.cashierShifts) setCashierShifts(data.db.cashierShifts);
         setActiveReceiptOrder(data.order);
         setCart([]);
         setDiscountAmount(0);
         setCashTendered("");
+      } else {
+        notifySaved(data.error || "Order rejected by domain guard.");
       }
     } finally {
       setSubmittingOrder(false);
@@ -686,12 +702,72 @@ export default function AlbarkaModernPOS() {
         entryId,
       }),
     });
+    const data = await res.json();
     if (res.ok) {
-      const data = await res.json();
       setParties(data.db.parties);
       setLedger(data.db.ledger);
+      if (data.db.immutableAuditLogs) setImmutableAuditLogs(data.db.immutableAuditLogs);
       if (editingEntryId === entryId) setEditingEntryId(null);
-      notifySaved(`Deleted voucher ${voucherNo} and adjusted balance.`);
+      notifySaved(`Voided voucher ${voucherNo} and adjusted balance.`);
+    } else {
+      notifySaved(data.error || "Action blocked by Fiscal Period Lock.");
+    }
+  }
+
+  async function handleReverseEntry(entryId: string, voucherNo: string) {
+    const res = await fetch("/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "REVERSE_ENTRY",
+        entryId,
+      }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setParties(data.db.parties);
+      setLedger(data.db.ledger);
+      if (data.db.immutableAuditLogs) setImmutableAuditLogs(data.db.immutableAuditLogs);
+      notifySaved(`Posted append-only Reversal Credit Note for ${voucherNo}.`);
+    } else {
+      notifySaved(data.error || "Reversal blocked by Fiscal Period Lock.");
+    }
+  }
+
+  async function handleToggleFiscalPeriod(periodKey: string) {
+    const res = await fetch("/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "TOGGLE_FISCAL_PERIOD",
+        periodKey,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.db.fiscalPeriods) setFiscalPeriods(data.db.fiscalPeriods);
+      if (data.db.immutableAuditLogs) setImmutableAuditLogs(data.db.immutableAuditLogs);
+      notifySaved(`Updated Fiscal Period lock for ${periodKey}.`);
+    }
+  }
+
+  async function handleReconcileShift(e: React.FormEvent) {
+    e.preventDefault();
+    const countedCashPkr = Number(countedCashInput);
+    if (!Number.isFinite(countedCashPkr) || countedCashPkr < 0) return;
+
+    const res = await fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reconcileShift: { countedCashPkr },
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.cashierShifts) setCashierShifts(data.cashierShifts);
+      if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
+      notifySaved("Cashier shift register reconciled and variance recorded.");
     }
   }
 
@@ -2278,6 +2354,14 @@ export default function AlbarkaModernPOS() {
                                 <div className="inline-flex items-center gap-1.5">
                                   <button
                                     type="button"
+                                    title="Post Append-Only Credit Note / Reversal"
+                                    onClick={() => handleReverseEntry(entry.id, entry.voucherNo)}
+                                    className="px-2 py-1 rounded-lg bg-[#edf2f4] hover:bg-[#2b2d42] text-[#2b2d42] hover:text-white text-xs font-semibold transition"
+                                  >
+                                    Reverse
+                                  </button>
+                                  <button
+                                    type="button"
                                     title="Edit Voucher"
                                     onClick={() => startEditingEntry(entry)}
                                     className="p-1.5 rounded-lg bg-[#edf2f4] hover:bg-[#2b2d42] text-[#2b2d42] hover:text-white transition"
@@ -2286,7 +2370,7 @@ export default function AlbarkaModernPOS() {
                                   </button>
                                   <button
                                     type="button"
-                                    title="Delete Voucher"
+                                    title="Void Voucher"
                                     onClick={() => handleDeleteEntry(entry.id, entry.voucherNo)}
                                     className="p-1.5 rounded-lg bg-[#edf2f4] hover:bg-[#ef233c] text-[#4a4e69] hover:text-white transition"
                                   >
@@ -2541,7 +2625,7 @@ export default function AlbarkaModernPOS() {
           )}
 
           {/* ================================================================= */}
-          {/* SECTION 6: DAILY Z-REPORT & SHIFT ANALYTICS                       */}
+          {/* SECTION 6: DAILY Z-REPORT, REGISTER SHIFT & FISCAL PERIOD LOCKS   */}
           {/* ================================================================= */}
           {activeSection === "Z_REPORT" && (
             <div className="space-y-6">
@@ -2588,6 +2672,144 @@ export default function AlbarkaModernPOS() {
                   </div>
                 </div>
               </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Cashier Shift & Register Drawer Reconciliation (Checklist Section 6) */}
+                <div className="lg:col-span-7 pos-card rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#e2e8f0] pb-3.5">
+                    <div>
+                      <h3 className="font-bold text-base text-[#2b2d42]">
+                        Cashier Shift & Register Drawer Reconciliation
+                      </h3>
+                      <p className="text-xs text-[#4a4e69] mt-0.5">
+                        Minor-Unit (Paisa) precision tracking of opening float, cash sales, and
+                        drawer variance
+                      </p>
+                    </div>
+                    <span className="px-3 py-1 rounded-md bg-[#2b2d42] text-white text-xs font-semibold">
+                      Shift OPEN
+                    </span>
+                  </div>
+
+                  {cashierShifts[0] && (
+                    <div className="space-y-4 text-sm">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <div className="p-3.5 rounded-xl bg-[#f8fafc] border border-[#d4dce4]">
+                          <div className="text-xs text-[#4a4e69]">Opening Float</div>
+                          <div className="font-mono font-bold text-[#2b2d42] mt-1">
+                            PKR {(cashierShifts[0].openingFloatMinor / 100).toLocaleString()}
+                          </div>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-[#f8fafc] border border-[#d4dce4]">
+                          <div className="text-xs text-[#4a4e69]">Shift Cash Sales</div>
+                          <div className="font-mono font-bold text-[#2b2d42] mt-1">
+                            PKR {(cashierShifts[0].cashSalesMinor / 100).toLocaleString()}
+                          </div>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-[#2b2d42] text-white">
+                          <div className="text-xs text-[#cbd5e1]">Expected Closing Cash</div>
+                          <div className="font-mono font-bold text-[#ef233c] mt-1">
+                            PKR{" "}
+                            {(cashierShifts[0].expectedClosingCashMinor / 100).toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+
+                      <form
+                        onSubmit={handleReconcileShift}
+                        className="flex flex-wrap items-end gap-3 pt-2"
+                      >
+                        <div className="flex-1 min-w-[200px]">
+                          <label className="text-xs font-semibold text-[#2b2d42] block mb-1">
+                            Counted Physical Cash in Drawer (PKR)
+                          </label>
+                          <input
+                            type="number"
+                            required
+                            value={countedCashInput}
+                            onChange={(e) => setCountedCashInput(e.target.value)}
+                            placeholder={`${cashierShifts[0].expectedClosingCashMinor / 100}`}
+                            className="w-full bg-[#f8fafc] border border-[#d4dce4] rounded-xl px-3.5 py-2 text-sm font-mono text-[#2b2d42]"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          className="px-5 py-2.5 rounded-xl bg-[#ef233c] hover:bg-[#d80032] text-white text-xs font-semibold transition"
+                        >
+                          Verify & Reconcile Drawer
+                        </button>
+                      </form>
+
+                      {cashierShifts[0].varianceMinor !== undefined && (
+                        <div className="p-3.5 rounded-xl bg-[#f8fafc] border border-[#d4dce4] flex items-center justify-between text-xs">
+                          <span className="font-semibold text-[#2b2d42]">
+                            Counted: PKR{" "}
+                            {(
+                              (cashierShifts[0].countedClosingCashMinor || 0) / 100
+                            ).toLocaleString()}
+                          </span>
+                          <span
+                            className={`font-mono font-bold ${
+                              cashierShifts[0].varianceMinor === 0
+                                ? "text-[#2b2d42]"
+                                : "text-[#d80032]"
+                            }`}
+                          >
+                            Variance: PKR {(cashierShifts[0].varianceMinor / 100).toLocaleString()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Fiscal Period Locking Control (Checklist Section 5) */}
+                <div className="lg:col-span-5 pos-card rounded-2xl p-6 space-y-4">
+                  <div>
+                    <h3 className="font-bold text-base text-[#2b2d42]">
+                      Fiscal Period Locking Control
+                    </h3>
+                    <p className="text-xs text-[#4a4e69] mt-0.5">
+                      Lock closed accounting months to block backdated invoices or ledger mutations
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {fiscalPeriods.map((fp) => (
+                      <div
+                        key={fp.periodKey}
+                        className="p-4 rounded-xl bg-[#f8fafc] border border-[#d4dce4] flex items-center justify-between gap-3"
+                      >
+                        <div>
+                          <div className="font-semibold text-sm text-[#2b2d42]">
+                            {fp.label}
+                          </div>
+                          <div className="text-xs font-mono text-[#4a4e69] mt-0.5">
+                            Period Key: {fp.periodKey} • Status:{" "}
+                            <strong
+                              className={fp.isLocked ? "text-[#d80032]" : "text-[#2b2d42]"}
+                            >
+                              {fp.isLocked ? "LOCKED (Immutable)" : "OPEN"}
+                            </strong>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleToggleFiscalPeriod(fp.periodKey)}
+                          className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition ${
+                            fp.isLocked
+                              ? "bg-[#2b2d42] text-white hover:bg-[#ef233c]"
+                              : "bg-[#ef233c] text-white hover:bg-[#d80032]"
+                          }`}
+                        >
+                          {fp.isLocked ? "Unlock Period" : "Lock Period"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -2618,6 +2840,10 @@ export default function AlbarkaModernPOS() {
                     {
                       id: "RESTAURANT_PROFILES",
                       label: "5. Restaurant & Staff Roles",
+                    },
+                    {
+                      id: "ERP_AUDIT_COMPLIANCE",
+                      label: "6. Immutable Audit Log & ERP Architecture",
                     },
                   ] as const
                 ).map((tab) => (
@@ -3074,6 +3300,89 @@ export default function AlbarkaModernPOS() {
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-TAB 6: IMMUTABLE AUDIT TRAIL & ERP ARCHITECTURE CHECKLIST */}
+              {settingsSubTab === "ERP_AUDIT_COMPLIANCE" && (
+                <div className="space-y-5">
+                  <div className="pos-card rounded-2xl p-6 space-y-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-[#2b2d42]">
+                        Modern Secure ERP Architecture Verification
+                      </h3>
+                      <p className="text-sm text-[#4a4e69] mt-0.5">
+                        Active Domain Service & Financial Integrity Guarantees (`src/core/*` &
+                        `src/modules/*`)
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+                      {[
+                        "ACID Transaction Wrapper (withTransaction)",
+                        "Minor-Unit Integer Paisa Math (src/core/money)",
+                        "Atomic Anti-Overselling Stock Guard",
+                        "Double-Entry Balanced Journal Verification",
+                        "Append-Only Reversal / Credit Notes",
+                        "Atomic Sequential Document Counters",
+                        "Historical Cost & Tax Snapshotting on Orders",
+                        "Granular RBAC + Branch ABAC Scoping",
+                        "NoSQL Operator Sanitizer + Idempotency Keys",
+                        "Soft Archiving Only (isArchived: true)",
+                        "Fiscal Period Locking Control",
+                        "Cashier Shift & Drawer Variance Tracking",
+                      ].map((checkItem) => (
+                        <div
+                          key={checkItem}
+                          className="p-3 rounded-xl bg-[#f8fafc] border border-[#d4dce4] flex items-center gap-2 font-semibold text-[#2b2d42]"
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-[#ef233c] shrink-0" />
+                          <span>{checkItem}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pos-card rounded-2xl p-6">
+                    <h4 className="font-bold text-base text-[#2b2d42] mb-3.5">
+                      Immutable Domain Audit Trail (`AuditLogs` Collection —{" "}
+                      {immutableAuditLogs.length} Records)
+                    </h4>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead>
+                          <tr className="bg-[#2b2d42] text-white">
+                            <th className="py-3 px-3 rounded-l-lg font-semibold">Timestamp</th>
+                            <th className="py-3 px-3 font-semibold">Module</th>
+                            <th className="py-3 px-3 font-semibold">Action</th>
+                            <th className="py-3 px-3 font-semibold">Actor</th>
+                            <th className="py-3 px-3 rounded-r-lg font-semibold">Summary</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#e2e8f0]">
+                          {immutableAuditLogs.map((aud) => (
+                            <tr key={aud.id} className="hover:bg-[#f8fafc]">
+                              <td className="py-3 px-3 font-mono text-xs text-[#4a4e69]">
+                                {new Date(aud.timestamp).toLocaleTimeString()}
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="px-2 py-0.5 rounded bg-[#edf2f4] text-[#2b2d42] font-mono text-xs font-semibold">
+                                  {aud.module}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 font-mono text-xs font-semibold text-[#d80032]">
+                                {aud.action}
+                              </td>
+                              <td className="py-3 px-3 font-semibold text-[#2b2d42] text-xs">
+                                {aud.actorName} ({aud.actorRole})
+                              </td>
+                              <td className="py-3 px-3 text-xs text-[#4a4e69]">{aud.summary}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}

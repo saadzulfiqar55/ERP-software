@@ -23,8 +23,23 @@ export type PRASyncStatus = "SYNCED" | "PENDING_OFFLINE" | "EXEMPT" | "FAILED";
 
 export type UserRole = "ADMIN" | "MANAGER" | "CASHIER";
 
+export type ERPPermission =
+  | "pos:sale:create"
+  | "pos:sale:void"
+  | "pos:discount:override"
+  | "inventory:view"
+  | "inventory:adjust"
+  | "inventory:archive"
+  | "accounting:journal:post"
+  | "accounting:journal:reverse"
+  | "accounting:period:close"
+  | "settings:pra:manage";
+
 export interface UserProfile {
   id: string;
+  tenantId?: string;
+  branchId?: string;
+  allowedBranches?: string[];
   name: string;
   role: UserRole;
   title: string;
@@ -32,6 +47,7 @@ export interface UserProfile {
   pin: string;
   avatarInitials: string;
   badgeColor: string;
+  granularPermissions?: ERPPermission[];
   permissions: {
     canEditPraSettings: boolean;
     canManageMenuPricing: boolean;
@@ -43,6 +59,8 @@ export interface UserProfile {
 
 export interface ActiveSession {
   sessionId: string;
+  tenantId?: string;
+  branchId?: string;
   userId: string;
   userName: string;
   userRole: UserRole;
@@ -58,11 +76,69 @@ export interface ActiveSession {
 export interface SessionAuditLog {
   id: string;
   timestamp: string;
-  event: "LOGIN_SUCCESS" | "LOGOUT" | "SESSION_LOCKED_CONFLICT" | "ADMIN_FORCE_TAKEOVER" | "TOKEN_REFRESH";
+  event:
+    | "LOGIN_SUCCESS"
+    | "LOGOUT"
+    | "SESSION_LOCKED_CONFLICT"
+    | "ADMIN_FORCE_TAKEOVER"
+    | "TOKEN_REFRESH";
   userId: string;
   userName: string;
   userRole: UserRole;
   details: string;
+}
+
+export interface ImmutableAuditLog {
+  id: string;
+  tenantId: string;
+  branchId: string;
+  timestamp: string;
+  actorId: string;
+  actorName: string;
+  actorRole: UserRole;
+  module: "POS" | "INVENTORY" | "ACCOUNTING" | "AUTH" | "SETTINGS";
+  action: "CREATE" | "UPDATE" | "REVERSE_VOID" | "SOFT_ARCHIVE" | "PERIOD_LOCK";
+  entityType: string;
+  entityId: string;
+  summary: string;
+}
+
+export interface IdempotencyRecord {
+  key: string;
+  scope: string;
+  createdAt: string;
+  responseStatus: number;
+  responseBody: unknown;
+}
+
+export interface DocumentCounter {
+  key: string; // e.g. "TENANT_ALBARKA:INVOICE:2026"
+  seq: number;
+}
+
+export interface CashierShift {
+  id: string;
+  tenantId: string;
+  branchId: string;
+  openedAt: string;
+  openedBy: string;
+  openingFloatMinor: number; // Minor units (paisa)
+  cashSalesMinor: number;
+  cardSalesMinor: number;
+  pettyCashPayoutsMinor: number;
+  expectedClosingCashMinor: number;
+  countedClosingCashMinor?: number;
+  varianceMinor?: number;
+  status: "OPEN" | "CLOSED";
+  closedAt?: string;
+}
+
+export interface FiscalPeriod {
+  periodKey: string; // e.g. "2026-11"
+  label: string;
+  isLocked: boolean;
+  lockedAt?: string;
+  lockedBy?: string;
 }
 
 export interface MongoDBConfig {
@@ -77,10 +153,13 @@ export interface ProductVariant {
   name: string;
   price: number;
   costPrice: number;
+  priceMinor?: number; // Integer paisa (PKR * 100)
 }
 
 export interface Product {
   id: string;
+  tenantId?: string;
+  branchId?: string;
   code: string;
   barcode?: string;
   name: string;
@@ -94,6 +173,8 @@ export interface Product {
   variants: ProductVariant[];
   popular?: boolean;
   imageUrl?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
 }
 
 export interface CartItem {
@@ -107,6 +188,8 @@ export interface CartItem {
   variantId: string;
   variantName: string;
   unitPrice: number;
+  unitCostSnapshot?: number;
+  taxRateSnapshot?: number;
   quantity: number;
   taxMode: TaxMode;
   notes?: string;
@@ -140,10 +223,14 @@ export interface TaxBreakdown {
   grandTotal: number;
   cashPortionTax: number;
   cardPortionTax: number;
+  grandTotalMinor?: number; // Integer minor units (paisa)
 }
 
 export interface Order {
   id: string;
+  tenantId?: string;
+  branchId?: string;
+  idempotencyKey?: string;
   invoiceNumber: string;
   usin: string;
   createdAt: string;
@@ -173,6 +260,8 @@ export type PartyType = "CUSTOMER" | "SUPPLIER" | "EXPENSE_HEAD";
 
 export interface PartyAccount {
   id: string;
+  tenantId?: string;
+  branchId?: string;
   name: string;
   nameUrdu?: string;
   type: PartyType;
@@ -180,20 +269,40 @@ export interface PartyAccount {
   ntnOrCnic?: string;
   creditLimit: number;
   currentBalance: number;
+  currentBalanceMinor?: number;
   notes?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+}
+
+export interface DoubleEntryLine {
+  accountCode: string;
+  accountName: string;
+  debitMinor: number;
+  creditMinor: number;
 }
 
 export interface LedgerEntry {
   id: string;
+  tenantId?: string;
+  branchId?: string;
   createdAt: string;
   partyId: string;
   partyName: string;
   partyType: PartyType;
   voucherNo: string;
   description: string;
-  paymentMode: "CASH" | "BANK_TRANSFER" | "CARD" | "CREDIT_INVOICE";
+  paymentMode: "CASH" | "BANK_TRANSFER" | "CARD" | "CREDIT_INVOICE" | "REVERSAL_NOTE";
   debit: number;
   credit: number;
   balanceAfter: number;
+  debitMinor?: number;
+  creditMinor?: number;
+  balanceAfterMinor?: number;
+  journalLines?: DoubleEntryLine[];
   relatedOrderId?: string;
+  isReversal?: boolean;
+  reversesEntryId?: string;
+  isReversed?: boolean;
+  isImmutable?: boolean;
 }
