@@ -61,7 +61,6 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     href: "/sales",
     iconName: "ShoppingBag",
     permission: "pos:sale:create",
-    badgeCount: 48,
     section: "PRIMARY",
   },
   {
@@ -70,7 +69,6 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     href: "/purchasing",
     iconName: "Truck",
     permission: "inventory:adjust",
-    badgeCount: 3,
     section: "PRIMARY",
   },
   {
@@ -79,7 +77,6 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     href: "/inventory",
     iconName: "Package",
     permission: "inventory:view",
-    badgeCount: 6,
     section: "PRIMARY",
   },
   {
@@ -88,7 +85,6 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     href: "/invoices",
     iconName: "FileText",
     permission: "pos:sale:create",
-    badgeCount: 18,
     section: "PRIMARY",
   },
   {
@@ -105,7 +101,6 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     href: "/hr",
     iconName: "Users",
     permission: "inventory:adjust",
-    badgeCount: 2,
     section: "PRIMARY",
   },
   {

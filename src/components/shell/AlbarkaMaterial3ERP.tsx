@@ -90,6 +90,7 @@ import {
 } from "@/components/ui/m3";
 import DashboardView from "@/components/dashboard/DashboardView";
 import InvoicesView from "@/components/invoices/InvoicesView";
+import { ERPInvoice, INITIAL_ERP_INVOICES } from "@/lib/mock/erp-data";
 import CommandPalette from "@/components/shell/CommandPalette";
 import ReceiptModal from "@/components/ReceiptModal";
 import DishVisual from "@/components/DishVisual";
@@ -172,6 +173,8 @@ export function AlbarkaMaterial3ERP({
   });
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
+  const [erpInvoices, setErpInvoices] =
+    useState<ERPInvoice[]>(INITIAL_ERP_INVOICES);
   const [parties, setParties] = useState<PartyAccount[]>(INITIAL_PARTIES);
   const [ledger, setLedger] = useState<LedgerEntry[]>(INITIAL_LEDGER);
   const [immutableAuditLogs, setImmutableAuditLogs] = useState<
@@ -1175,6 +1178,29 @@ export function AlbarkaMaterial3ERP({
     .filter((p) => p.type === "SUPPLIER" && p.currentBalance < 0)
     .reduce((s, p) => s + Math.abs(p.currentBalance), 0);
 
+  const supplierCount = parties.filter((p) => p.type === "SUPPLIER").length;
+
+  const getNavBadgeCount = (key: ERPNavKey): number | undefined => {
+    switch (key) {
+      case "pos":
+        return cart.length;
+      case "sales":
+        return orders.length;
+      case "purchasing":
+        return supplierCount;
+      case "inventory":
+        return products.length;
+      case "invoices":
+        return erpInvoices.length;
+      case "accounting":
+        return ledger.length;
+      case "hr":
+        return users.length;
+      default:
+        return undefined;
+    }
+  };
+
   return (
     <div className="min-h-screen flex bg-md-surface text-md-on-surface">
       {/* =================================================================== */}
@@ -1271,9 +1297,7 @@ export function AlbarkaMaterial3ERP({
                     icon={renderNavIcon(item.iconName)}
                     label={item.label}
                     active={activeNav === item.key}
-                    badgeCount={
-                      item.key === "pos" ? cart.length : item.badgeCount
-                    }
+                    badgeCount={getNavBadgeCount(item.key)}
                     onClick={() => {
                       setActiveNav(item.key);
                       if (item.key === "invoices") setInvoiceViewKey("LIST");
@@ -1381,7 +1405,7 @@ export function AlbarkaMaterial3ERP({
                     icon={renderNavIcon(item.iconName)}
                     label={item.label}
                     active={activeNav === item.key}
-                    badgeCount={item.badgeCount}
+                    badgeCount={getNavBadgeCount(item.key)}
                     onClick={() => {
                       setActiveNav(item.key);
                       setMobileDrawerOpen(false);
@@ -1524,6 +1548,8 @@ export function AlbarkaMaterial3ERP({
               initialMode={invoiceViewKey}
               parties={parties}
               products={products}
+              invoices={erpInvoices}
+              onInvoicesChange={setErpInvoices}
               onShowSnackbar={notifySaved}
             />
           )}

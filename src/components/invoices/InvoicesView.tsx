@@ -42,6 +42,8 @@ interface InvoicesViewProps {
   initialMode?: "LIST" | "NEW";
   parties: PartyAccount[];
   products: Product[];
+  invoices?: ERPInvoice[];
+  onInvoicesChange?: React.Dispatch<React.SetStateAction<ERPInvoice[]>>;
   onShowSnackbar: (msg: string) => void;
 }
 
@@ -49,10 +51,15 @@ export default function InvoicesView({
   initialMode = "LIST",
   parties,
   products,
+  invoices: controlledInvoices,
+  onInvoicesChange,
   onShowSnackbar,
 }: InvoicesViewProps) {
   const [viewMode, setViewMode] = useState<"LIST" | "NEW">(initialMode);
-  const [invoices, setInvoices] = useState<ERPInvoice[]>(INITIAL_ERP_INVOICES);
+  const [internalInvoices, setInternalInvoices] =
+    useState<ERPInvoice[]>(INITIAL_ERP_INVOICES);
+  const invoices = controlledInvoices ?? internalInvoices;
+  const setInvoices = onInvoicesChange ?? setInternalInvoices;
 
   // List Filter & Pagination State
   const [statusFilter, setStatusFilter] = useState<"ALL" | InvoiceStatus>("ALL");
