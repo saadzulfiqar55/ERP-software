@@ -64,13 +64,12 @@ import {
   INITIAL_USERS,
 } from "@/lib/seed-data";
 import { calculateSalesTax } from "@/lib/tax-calculator";
-import { MONGOOSE_SCHEMA_REFERENCE } from "@/lib/mongodb";
 import {
   ERP_BRAND_CONFIG,
   ERP_NAVIGATION_ITEMS,
   ERPNavKey,
 } from "@/lib/nav";
-import { hasGranularPermission } from "@/core/auth";
+import { hasGranularPermission } from "@/core/auth/permissions";
 import {
   Avatar,
   Button,
