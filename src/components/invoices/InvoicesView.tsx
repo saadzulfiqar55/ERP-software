@@ -15,6 +15,7 @@ import {
   Button,
   Card,
   Checkbox,
+  CompactField,
   EmptyState,
   FilterChip,
   mapInvoiceStatusToChipVariant,
@@ -453,59 +454,61 @@ export default function InvoicesView({
                       return (
                         <tr key={item.id}>
                           <td className="py-3 pr-3">
-                            <input
-                              type="text"
+                            <CompactField
                               value={item.description}
-                              onChange={(e) =>
+                              onChange={(val) =>
                                 updateLineItem(item.id, {
-                                  description: e.target.value,
+                                  description: val,
                                 })
                               }
                               placeholder="Item or service description"
-                              className="w-full h-10 px-3 rounded bg-md-surface-container-lowest border border-md-outline text-sm text-md-on-surface"
+                              className="w-full"
                             />
                           </td>
                           <td className="py-3 px-2">
-                            <input
+                            <CompactField
                               type="number"
                               min={1}
+                              mono
                               value={item.quantity}
-                              onChange={(e) =>
+                              onChange={(val) =>
                                 updateLineItem(item.id, {
-                                  quantity: Math.max(1, Number(e.target.value) || 1),
+                                  quantity: Math.max(1, Number(val) || 1),
                                 })
                               }
-                              className="w-full h-10 px-2.5 rounded bg-md-surface-container-lowest border border-md-outline text-sm font-mono tabular-nums text-md-on-surface"
+                              className="w-full"
                             />
                           </td>
                           <td className="py-3 px-2">
-                            <input
+                            <CompactField
                               type="number"
                               min={0}
+                              mono
                               value={Math.round(item.unitPriceMinor / 100)}
-                              onChange={(e) =>
+                              onChange={(val) =>
                                 updateLineItem(item.id, {
                                   unitPriceMinor: Math.max(
                                     0,
-                                    Math.round((Number(e.target.value) || 0) * 100)
+                                    Math.round((Number(val) || 0) * 100)
                                   ),
                                 })
                               }
-                              className="w-full h-10 px-2.5 rounded bg-md-surface-container-lowest border border-md-outline text-sm font-mono tabular-nums text-md-on-surface"
+                              className="w-full"
                             />
                           </td>
                           <td className="py-3 px-2">
-                            <input
+                            <CompactField
                               type="number"
                               min={0}
                               max={100}
+                              mono
                               value={item.taxPercent}
-                              onChange={(e) =>
+                              onChange={(val) =>
                                 updateLineItem(item.id, {
-                                  taxPercent: Math.max(0, Number(e.target.value) || 0),
+                                  taxPercent: Math.max(0, Number(val) || 0),
                                 })
                               }
-                              className="w-full h-10 px-2.5 rounded bg-md-surface-container-lowest border border-md-outline text-sm font-mono tabular-nums text-md-on-surface"
+                              className="w-full"
                             />
                           </td>
                           <td className="py-3 px-2 text-right font-mono font-medium tabular-nums text-md-on-surface">
@@ -601,17 +604,18 @@ export default function InvoicesView({
 
                 <div className="flex items-center justify-between gap-3 pt-1">
                   <span className="text-md-on-surface-variant">Discount %</span>
-                  <input
+                  <CompactField
                     type="number"
                     min={0}
                     max={100}
+                    mono
                     value={discountPercent}
-                    onChange={(e) =>
+                    onChange={(val) =>
                       setDiscountPercent(
-                        Math.min(100, Math.max(0, Number(e.target.value) || 0))
+                        Math.min(100, Math.max(0, Number(val) || 0))
                       )
                     }
-                    className="w-20 h-9 px-2.5 rounded bg-md-surface-container-lowest border border-md-outline text-right font-mono text-sm text-md-on-surface"
+                    className="w-20 text-right"
                   />
                 </div>
               </div>
@@ -785,7 +789,7 @@ export default function InvoicesView({
                 setPage(1);
               }}
               aria-label="Filter by customer"
-              className="h-8 px-3 rounded-lg border border-md-outline bg-transparent text-xs font-medium text-md-on-surface-variant"
+              className="h-8 px-3 rounded-lg border border-md-outline-variant/85 bg-md-surface-container-lowest hover:bg-md-surface-container-low text-xs font-medium text-md-on-surface-variant outline-none transition"
             >
               <option value="ALL">Customer: All ▾</option>
               {Array.from(new Set(invoices.map((i) => i.customerName))).map(
@@ -797,7 +801,7 @@ export default function InvoicesView({
               )}
             </select>
 
-            <span className="h-8 px-3 rounded-lg border border-md-outline inline-flex items-center text-xs font-medium text-md-on-surface-variant">
+            <span className="h-8 px-3 rounded-lg border border-md-outline-variant/85 bg-md-surface-container-lowest inline-flex items-center text-xs font-medium text-md-on-surface-variant">
               Issue date: Last 90 days ▾
             </span>
           </div>

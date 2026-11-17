@@ -74,6 +74,7 @@ import {
   Avatar,
   Button,
   Card,
+  CompactField,
   ExtendedFab,
   FilterChip,
   NavItem,
@@ -1551,24 +1552,22 @@ export function AlbarkaMaterial3ERP({
                         onSubmit={handleBarcodeScan}
                         className="flex items-center gap-2 flex-1 max-w-sm"
                       >
-                        <input
-                          type="text"
+                        <CompactField
                           value={barcodeInput}
-                          onChange={(e) => setBarcodeInput(e.target.value)}
+                          onChange={setBarcodeInput}
                           placeholder="Scan barcode or SKU (101, 501)…"
-                          className="h-10 flex-1 px-3.5 rounded bg-md-surface-container-lowest border border-md-outline text-sm text-md-on-surface"
+                          className="flex-1"
                         />
                         <Button type="submit" variant="tonal" size="sm">
                           Add SKU
                         </Button>
                       </form>
 
-                      <input
-                        type="text"
+                      <CompactField
                         value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onChange={setSearchQuery}
                         placeholder="Filter Karahi, BBQ, Pulao, Halwa…"
-                        className="h-10 w-full sm:w-64 px-3.5 rounded bg-md-surface-container-lowest border border-md-outline text-sm text-md-on-surface"
+                        className="w-full sm:w-64"
                       />
                     </div>
 
@@ -2031,7 +2030,7 @@ export function AlbarkaMaterial3ERP({
                       />
                     </div>
 
-                    <div className="p-3.5 rounded-xl bg-md-surface-container-low space-y-2">
+                    <div className="p-3.5 rounded-xl bg-md-surface-container-low space-y-2.5">
                       <label className="text-xs font-medium text-md-on-surface-variant block">
                         Product photo (file or URL)
                       </label>
@@ -2039,14 +2038,13 @@ export function AlbarkaMaterial3ERP({
                         type="file"
                         accept="image/*"
                         onChange={handleNewProdImageFile}
-                        className="w-full text-xs text-md-on-surface-variant"
+                        className="w-full text-xs text-md-on-surface-variant file:mr-3 file:py-1.5 file:px-3.5 file:rounded-full file:border-0 file:text-xs file:font-medium file:bg-md-secondary-container file:text-md-on-secondary-container hover:file:bg-md-primary-container"
                       />
-                      <input
-                        type="text"
+                      <CompactField
                         value={newProdImageUrl}
-                        onChange={(e) => setNewProdImageUrl(e.target.value)}
-                        placeholder="https://…"
-                        className="w-full h-9 px-3 rounded bg-md-surface-container-lowest border border-md-outline text-xs"
+                        onChange={setNewProdImageUrl}
+                        placeholder="Or paste image URL (https://…)"
+                        className="w-full"
                       />
                     </div>
 
