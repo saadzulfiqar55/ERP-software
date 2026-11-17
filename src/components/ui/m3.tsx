@@ -34,3 +34,8 @@ export {
   type ThemePreference,
   type ResolvedTheme,
 } from "./ThemeToggle";
+export {
+  M3Select,
+  CompactSelect,
+  type M3SelectOption,
+} from "./Select";

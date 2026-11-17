@@ -75,6 +75,7 @@ import {
   Button,
   Card,
   CompactField,
+  CompactSelect,
   ExtendedFab,
   FilterChip,
   NavItem,
@@ -1749,23 +1750,23 @@ export function AlbarkaMaterial3ERP({
                             </div>
 
                             {item.segment === "RESTAURANT" && (
-                              <select
+                              <CompactSelect
+                                variant="subtle"
+                                minMenuWidth={190}
                                 value={item.notes || ""}
-                                onChange={(e) =>
-                                  updateItemNote(
-                                    item.cartItemId,
-                                    e.target.value
-                                  )
+                                placeholder="Chef note…"
+                                ariaLabel="Chef note"
+                                onChange={(val) =>
+                                  updateItemNote(item.cartItemId, val)
                                 }
-                                className="h-7 px-2 rounded bg-md-surface-container-lowest border border-md-outline-variant text-xs"
-                              >
-                                <option value="">Chef note…</option>
-                                {QUICK_CHEF_NOTES.map((n) => (
-                                  <option key={n} value={n}>
-                                    {n}
-                                  </option>
-                                ))}
-                              </select>
+                                options={[
+                                  { value: "", label: "Chef note…" },
+                                  ...QUICK_CHEF_NOTES.map((n) => ({
+                                    value: n,
+                                    label: n,
+                                  })),
+                                ]}
+                              />
                             )}
 
                             <button
@@ -2212,7 +2213,7 @@ export function AlbarkaMaterial3ERP({
                       </div>
                     </div>
 
-                    <div className="space-y-2.5 max-h-80 overflow-y-auto">
+                    <div className="space-y-2.5 max-h-80 overflow-y-auto p-[5px]">
                       {parties
                         .filter(
                           (p) =>

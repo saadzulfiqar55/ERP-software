@@ -16,6 +16,7 @@ import {
   Card,
   Checkbox,
   CompactField,
+  CompactSelect,
   EmptyState,
   FilterChip,
   mapInvoiceStatusToChipVariant,
@@ -395,10 +396,14 @@ export default function InvoicesView({
                 </h2>
 
                 {/* Quick Pick from Product Catalog */}
-                <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    const prod = products.find((p) => p.id === e.target.value);
+                <CompactSelect
+                  variant="tonal"
+                  minMenuWidth={280}
+                  value=""
+                  placeholder="+ Pick from product catalogue…"
+                  ariaLabel="Pick from product catalogue"
+                  onChange={(val) => {
+                    const prod = products.find((p) => p.id === val);
                     if (prod && prod.variants[0]) {
                       setLineItems((prev) => [
                         ...prev,
@@ -412,17 +417,12 @@ export default function InvoicesView({
                         },
                       ]);
                     }
-                    e.target.value = "";
                   }}
-                  className="h-9 px-3.5 rounded-full border-0 bg-md-secondary-container/75 hover:bg-md-secondary-container text-xs font-medium text-md-on-secondary-container cursor-pointer transition-all duration-150"
-                >
-                  <option value="">+ Pick from product catalogue…</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      #{p.code} · {p.name} (PKR {p.variants[0]?.price})
-                    </option>
-                  ))}
-                </select>
+                  options={products.map((p) => ({
+                    value: p.id,
+                    label: `#${p.code} · ${p.name} (PKR ${p.variants[0]?.price})`,
+                  }))}
+                />
               </div>
 
               {formErrors.lineItems && (
@@ -782,27 +782,29 @@ export default function InvoicesView({
             <div className="h-6 w-px bg-md-divider mx-1 hidden sm:block" />
 
             {/* Customer Dropdown Chip */}
-            <select
+            <CompactSelect
+              variant="chip"
+              minMenuWidth={240}
               value={customerFilter}
-              onChange={(e) => {
-                setCustomerFilter(e.target.value);
+              prefixLabel="Customer"
+              ariaLabel="Filter by customer"
+              onChange={(val) => {
+                setCustomerFilter(val);
                 setPage(1);
               }}
-              aria-label="Filter by customer"
-              className="h-8 px-3 rounded-lg border border-md-outline-variant/85 bg-md-surface-container-lowest hover:bg-md-surface-container-low text-xs font-medium text-md-on-surface-variant outline-none transition"
-            >
-              <option value="ALL">Customer: All ▾</option>
-              {Array.from(new Set(invoices.map((i) => i.customerName))).map(
-                (cName) => (
-                  <option key={cName} value={cName}>
-                    {cName}
-                  </option>
-                )
-              )}
-            </select>
+              options={[
+                { value: "ALL", label: "All" },
+                ...Array.from(new Set(invoices.map((i) => i.customerName))).map(
+                  (cName) => ({
+                    value: cName,
+                    label: cName,
+                  })
+                ),
+              ]}
+            />
 
-            <span className="h-8 px-3 rounded-lg border border-md-outline-variant/85 bg-md-surface-container-lowest inline-flex items-center text-xs font-medium text-md-on-surface-variant">
-              Issue date: Last 90 days ▾
+            <span className="border-0 h-8 px-3 rounded-lg bg-md-surface-container-low inline-flex items-center text-xs font-medium text-md-on-surface-variant">
+              Issue date: Last 90 days
             </span>
           </div>
         </div>

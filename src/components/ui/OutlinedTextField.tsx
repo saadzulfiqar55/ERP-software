@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { ChevronDown } from "lucide-react";
+import { M3Select } from "./Select";
 
 export interface OutlinedTextFieldProps {
   label: string;
@@ -66,26 +66,15 @@ export function OutlinedTextField({
         </label>
 
         {options ? (
-          <div className="relative flex items-center">
-            <select
-              value={value}
-              disabled={readOnly}
-              onChange={(e) => onChange?.(e.target.value)}
-              className={`w-full h-12 pl-3.5 pr-9 pt-0.5 bg-transparent text-sm text-md-on-surface appearance-none outline-none ${
-                mono ? "font-mono" : ""
-              }`}
-            >
-              {options.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              className="w-4 h-4 text-md-on-surface-variant absolute right-3 pointer-events-none transition-transform group-focus-within:text-md-primary"
-              strokeWidth={1.8}
-            />
-          </div>
+          <M3Select
+            value={value}
+            options={options}
+            onChange={onChange}
+            disabled={readOnly}
+            mono={mono}
+            placeholder={placeholder}
+            ariaLabel={label}
+          />
         ) : multiline ? (
           <textarea
             rows={rows}
