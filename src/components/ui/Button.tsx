@@ -72,7 +72,7 @@ export function ExtendedFab({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className={`border-0 h-14 rounded-2xl bg-md-primary-container text-md-on-primary-container font-medium text-sm tracking-[0.01em] shadow-[0_2px_8px_rgba(0,29,54,0.10)] hover:bg-md-secondary-container hover:-translate-y-[1.5px] hover:scale-[1.012] hover:shadow-[0_8px_20px_rgba(0,29,54,0.14)] active:translate-y-0 active:scale-[0.985] inline-flex items-center transition-all duration-200 ease-out ${
+      className={`border-0 h-14 rounded-2xl bg-md-primary-container text-md-on-primary-container font-medium text-sm tracking-[0.01em] shadow-[0_2px_8px_rgba(0,29,54,0.10)] hover:bg-md-secondary-container hover:shadow-[0_6px_16px_rgba(0,29,54,0.14)] active:scale-[0.99] inline-flex items-center transition-all duration-200 ease-out ${
         collapsed ? "w-14 justify-center p-0" : "px-5 gap-3 w-full"
       }`}
     >
