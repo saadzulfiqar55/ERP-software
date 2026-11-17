@@ -1,3 +1,4 @@
+import dns from "node:dns";
 import { MongoClient } from "mongodb";
 import type { DatabaseSchema } from "./db";
 
@@ -95,6 +96,29 @@ export function assertSafeMongoUri(uri: string): void {
   }
 }
 
+async function connectWithDnsFallback(uri: string): Promise<MongoClient> {
+  const options = {
+    serverSelectionTimeoutMS: 5000,
+    maxPoolSize: 10,
+  };
+  try {
+    const client = new MongoClient(uri, options);
+    return await client.connect();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (
+      uri.startsWith("mongodb+srv://") &&
+      (msg.includes("querySrv") || msg.includes("ECONNREFUSED") || msg.includes("ETIMEOUT"))
+    ) {
+      // Fallback for Windows/ISP routers whose local DNS stub rejects SRV lookups
+      dns.setServers(["8.8.8.8", "1.1.1.1"]);
+      const retryClient = new MongoClient(uri, options);
+      return await retryClient.connect();
+    }
+    throw err;
+  }
+}
+
 async function getMongoClient(uri: string): Promise<MongoClient> {
   const cache = getClientCache();
   const existing = cache.get(uri);
@@ -102,12 +126,7 @@ async function getMongoClient(uri: string): Promise<MongoClient> {
     return existing;
   }
 
-  const client = new MongoClient(uri, {
-    serverSelectionTimeoutMS: 4000,
-    maxPoolSize: 10,
-  });
-
-  const promise = client.connect().catch((err) => {
+  const promise = connectWithDnsFallback(uri).catch((err) => {
     cache.delete(uri);
     throw err;
   });
