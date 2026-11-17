@@ -47,15 +47,23 @@ export async function PUT(request: Request) {
 
       if (body.mongoConfig) {
         const incoming = body.mongoConfig as Partial<MongoDBConfig>;
+        const incomingUri = incoming.uri?.trim() || "";
+        const isStaleLocalDefault =
+          incomingUri.startsWith("mongodb://127.0.0.1:27017/") &&
+          txDb.mongoConfig.uri.startsWith("mongodb+srv://");
+
         const preservedUri =
-          incoming.uri && !isMaskedMongoUri(incoming.uri)
-            ? incoming.uri.trim()
+          incomingUri && !isMaskedMongoUri(incomingUri) && !isStaleLocalDefault
+            ? incomingUri
             : txDb.mongoConfig.uri;
 
         const nextMongo: MongoDBConfig = {
           ...txDb.mongoConfig,
           ...incoming,
           uri: preservedUri,
+          dbName: isStaleLocalDefault
+            ? txDb.mongoConfig.dbName
+            : incoming.dbName || txDb.mongoConfig.dbName,
         };
         const pingResult = await pingMongoConnection(
           nextMongo.uri,

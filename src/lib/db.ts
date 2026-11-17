@@ -50,14 +50,33 @@ export interface DatabaseSchema {
 
 const DB_DIR = path.join(process.cwd(), "data");
 const DB_FILE = path.join(DB_DIR, "albarka-db.json");
+const ENV_LOCAL_FILE = path.join(process.cwd(), ".env.local");
+
+function readDotEnvLocalValue(key: string): string | undefined {
+  try {
+    if (!fs.existsSync(ENV_LOCAL_FILE)) return undefined;
+    const raw = fs.readFileSync(ENV_LOCAL_FILE, "utf-8");
+    const regex = new RegExp(`^${key}=(?:"([^"]*)"|'([^']*)'|([^\\r\\n#]*))`, "m");
+    const match = raw.match(regex);
+    const val = match?.[1] ?? match?.[2] ?? match?.[3];
+    return val?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function getEnvMongoConfig(): MongoDBConfig | null {
-  const envUri = process.env.MONGODB_URI?.trim();
+  const envUri =
+    process.env.MONGODB_URI?.trim() || readDotEnvLocalValue("MONGODB_URI");
   if (!envUri) return null;
+
+  const envDbName =
+    process.env.MONGODB_DB_NAME?.trim() ||
+    readDotEnvLocalValue("MONGODB_DB_NAME");
 
   let safeDb = DEFAULT_ISOLATED_DB_NAME;
   try {
-    safeDb = resolveIsolatedDbName(process.env.MONGODB_DB_NAME);
+    safeDb = resolveIsolatedDbName(envDbName);
   } catch {
     safeDb = DEFAULT_ISOLATED_DB_NAME;
   }
