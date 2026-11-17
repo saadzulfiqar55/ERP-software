@@ -68,7 +68,7 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     label: "Purchasing",
     href: "/purchasing",
     iconName: "Truck",
-    permission: "inventory:adjust",
+    permission: "accounting:ledger:view",
     section: "PRIMARY",
   },
   {
@@ -92,7 +92,7 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     label: "Accounting",
     href: "/accounting",
     iconName: "BookOpen",
-    permission: "accounting:journal:post",
+    permission: "accounting:ledger:view",
     section: "PRIMARY",
   },
   {
@@ -100,7 +100,7 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     label: "People & HR",
     href: "/hr",
     iconName: "Users",
-    permission: "inventory:adjust",
+    permission: "accounting:ledger:view",
     section: "PRIMARY",
   },
   {

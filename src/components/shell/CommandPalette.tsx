@@ -11,7 +11,8 @@ import {
   X,
 } from "lucide-react";
 import { Button, StatusChip } from "@/components/ui/m3";
-import { Order, PartyAccount, Product } from "@/lib/types";
+import { hasGranularPermission } from "@/core/auth/permissions";
+import { Order, PartyAccount, Product, UserRole } from "@/lib/types";
 import { ERP_NAVIGATION_ITEMS } from "@/lib/nav";
 
 interface CommandPaletteProps {
@@ -21,6 +22,7 @@ interface CommandPaletteProps {
   products: Product[];
   orders: Order[];
   parties: PartyAccount[];
+  userRole?: UserRole;
 }
 
 export default function CommandPalette({
@@ -30,6 +32,7 @@ export default function CommandPalette({
   products,
   orders,
   parties,
+  userRole = "CASHIER",
 }: CommandPaletteProps) {
   const [query, setQuery] = useState<string>("");
 
@@ -51,8 +54,11 @@ export default function CommandPalette({
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const canViewLedger = hasGranularPermission(userRole, "accounting:ledger:view");
     const matchedNav = ERP_NAVIGATION_ITEMS.filter(
-      (n) => !q || n.label.toLowerCase().includes(q)
+      (n) =>
+        hasGranularPermission(userRole, n.permission) &&
+        (!q || n.label.toLowerCase().includes(q))
     ).slice(0, 4);
 
     const matchedProducts = products
@@ -64,9 +70,11 @@ export default function CommandPalette({
       )
       .slice(0, 4);
 
-    const matchedParties = parties
-      .filter((p) => !q || p.name.toLowerCase().includes(q))
-      .slice(0, 3);
+    const matchedParties = canViewLedger
+      ? parties
+          .filter((p) => !q || p.name.toLowerCase().includes(q))
+          .slice(0, 3)
+      : [];
 
     const matchedOrders = orders
       .filter(
@@ -78,7 +86,7 @@ export default function CommandPalette({
       .slice(0, 3);
 
     return { matchedNav, matchedProducts, matchedParties, matchedOrders };
-  }, [query, products, parties, orders]);
+  }, [query, products, parties, orders, userRole]);
 
   if (!open) return null;
 

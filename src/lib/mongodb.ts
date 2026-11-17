@@ -14,6 +14,7 @@ const PROTECTED_FOREIGN_DBS = new Set(["votix", "admin", "local", "config"]);
 export const MONGODB_COLLECTIONS = {
   PRODUCTS: "products",
   ORDERS: "orders",
+  INVOICES: "invoices",
   PARTIES: "parties",
   LEDGER: "ledger_entries",
   SETTINGS: "system_settings",
@@ -255,6 +256,11 @@ export async function syncSnapshotToMongoIfAvailable(
     await Promise.all([
       replaceCollectionDocs(db, MONGODB_COLLECTIONS.PRODUCTS, snapshot.products),
       replaceCollectionDocs(db, MONGODB_COLLECTIONS.ORDERS, snapshot.orders),
+      replaceCollectionDocs(
+        db,
+        MONGODB_COLLECTIONS.INVOICES,
+        snapshot.erpInvoices || []
+      ),
       replaceCollectionDocs(db, MONGODB_COLLECTIONS.PARTIES, snapshot.parties),
       replaceCollectionDocs(db, MONGODB_COLLECTIONS.LEDGER, snapshot.ledger),
       replaceCollectionDocs(

@@ -38,7 +38,7 @@ export const INITIAL_USERS: UserProfile[] = [
       canEditPraSettings: false,
       canManageMenuPricing: true,
       canApproveDiscounts: true,
-      canManageKhata: true,
+      canManageKhata: false,
       canViewFinancialReports: true,
     },
   },

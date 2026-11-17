@@ -44,6 +44,7 @@ interface InvoicesViewProps {
   products: Product[];
   invoices?: ERPInvoice[];
   onInvoicesChange?: React.Dispatch<React.SetStateAction<ERPInvoice[]>>;
+  canDeleteInvoices?: boolean;
   onShowSnackbar: (msg: string) => void;
 }
 
@@ -53,6 +54,7 @@ export default function InvoicesView({
   products,
   invoices: controlledInvoices,
   onInvoicesChange,
+  canDeleteInvoices = false,
   onShowSnackbar,
 }: InvoicesViewProps) {
   const [viewMode, setViewMode] = useState<"LIST" | "NEW">(initialMode);
@@ -67,7 +69,33 @@ export default function InvoicesView({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [voidConfirmInvoice, setVoidConfirmInvoice] =
-    useState<ERPInvoice | null>(null);
+    useState<{ invoice: ERPInvoice; mode: "VOID" | "DELETE" } | null>(null);
+
+  async function syncInvoiceMutation(
+    payload: Record<string, unknown>,
+    successMsg: string
+  ) {
+    try {
+      const res = await fetch("/api/invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        onShowSnackbar(data.error || "Permission denied");
+        return false;
+      }
+      if (data.erpInvoices) {
+        setInvoices(data.erpInvoices);
+      }
+      onShowSnackbar(successMsg);
+      return true;
+    } catch {
+      onShowSnackbar("Network error syncing invoice update.");
+      return false;
+    }
+  }
   const [page, setPage] = useState<number>(1);
   const rowsPerPage = 10;
 
@@ -273,6 +301,12 @@ export default function InvoicesView({
 
     setInvoices((prev) => [created, ...prev]);
     setViewMode("LIST");
+    void syncInvoiceMutation(
+      { action: "CREATE", invoice: created },
+      targetStatus === "SENT"
+        ? `Sent invoice ${created.invoiceNumber} to ${created.customerName}`
+        : `Saved draft invoice ${created.invoiceNumber}`
+    );
     onShowSnackbar(
       targetStatus === "SENT"
         ? `Invoice ${created.invoiceNumber} sent to ${created.customerEmail}`
@@ -840,15 +874,17 @@ export default function InvoicesView({
                 variant="outlined"
                 size="sm"
                 onClick={() => {
+                  const ids = [...selectedIds];
                   setInvoices((prev) =>
                     prev.map((inv) =>
-                      selectedIds.includes(inv.id)
-                        ? { ...inv, status: "SENT" }
-                        : inv
+                      ids.includes(inv.id) ? { ...inv, status: "SENT" } : inv
                     )
                   );
-                  onShowSnackbar(`Marked ${selectedIds.length} invoices as Sent`);
                   setSelectedIds([]);
+                  void syncInvoiceMutation(
+                    { action: "BULK_MARK_SENT", invoiceIds: ids },
+                    `Marked ${ids.length} invoices as Sent`
+                  );
                 }}
               >
                 Mark as sent
@@ -966,7 +1002,8 @@ export default function InvoicesView({
                                   )
                                 );
                                 setOpenMenuId(null);
-                                onShowSnackbar(
+                                void syncInvoiceMutation(
+                                  { action: "MARK_PAID", invoiceId: inv.id },
                                   `Recorded payment for ${inv.invoiceNumber}`
                                 );
                               }}
@@ -985,7 +1022,10 @@ export default function InvoicesView({
                                 };
                                 setInvoices((prev) => [dup, ...prev]);
                                 setOpenMenuId(null);
-                                onShowSnackbar(`Duplicated ${inv.invoiceNumber}`);
+                                void syncInvoiceMutation(
+                                  { action: "DUPLICATE", invoice: dup },
+                                  `Duplicated ${inv.invoiceNumber}`
+                                );
                               }}
                               className="w-full px-4 py-2 hover:bg-md-surface-container-low text-md-on-surface"
                             >
@@ -1003,16 +1043,36 @@ export default function InvoicesView({
                             >
                               Send reminder
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenMenuId(null);
-                                setVoidConfirmInvoice(inv);
-                              }}
-                              className="w-full px-4 py-2 hover:bg-md-error-container text-md-error font-medium"
-                            >
-                              Void invoice
-                            </button>
+                            {canDeleteInvoices && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenMenuId(null);
+                                    setVoidConfirmInvoice({
+                                      invoice: inv,
+                                      mode: "VOID",
+                                    });
+                                  }}
+                                  className="w-full px-4 py-2 hover:bg-md-error-container text-md-error font-medium"
+                                >
+                                  Void invoice
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenMenuId(null);
+                                    setVoidConfirmInvoice({
+                                      invoice: inv,
+                                      mode: "DELETE",
+                                    });
+                                  }}
+                                  className="w-full px-4 py-2 hover:bg-md-error-container text-md-error font-semibold"
+                                >
+                                  Delete invoice
+                                </button>
+                              </>
+                            )}
                           </div>
                         )}
                       </td>
@@ -1060,8 +1120,8 @@ export default function InvoicesView({
         </div>
       </Card>
 
-      {/* Confirmation Dialog for Voiding an Invoice */}
-      {voidConfirmInvoice && (
+      {/* Confirmation Dialog for Voiding / Deleting an Invoice (Super Admin Only) */}
+      {voidConfirmInvoice && canDeleteInvoices && (
         <div
           role="dialog"
           aria-modal="true"
@@ -1069,15 +1129,29 @@ export default function InvoicesView({
         >
           <Card className="max-w-md w-full space-y-4">
             <h3 className="text-[22px] leading-[28px] font-normal text-md-on-surface">
-              Void {voidConfirmInvoice.invoiceNumber}?
+              {voidConfirmInvoice.mode === "DELETE" ? "Delete" : "Void"}{" "}
+              {voidConfirmInvoice.invoice.invoiceNumber}?
             </h3>
             <p className="text-sm text-md-on-surface-variant">
-              This will mark invoice{" "}
-              <strong className="font-mono text-md-on-surface">
-                {voidConfirmInvoice.invoiceNumber}
-              </strong>{" "}
-              for {voidConfirmInvoice.customerName} as Cancelled/Voided in the
-              immutable audit register.
+              {voidConfirmInvoice.mode === "DELETE" ? (
+                <>
+                  This will permanently remove invoice{" "}
+                  <strong className="font-mono text-md-on-surface">
+                    {voidConfirmInvoice.invoice.invoiceNumber}
+                  </strong>{" "}
+                  for {voidConfirmInvoice.invoice.customerName} from the active
+                  register and record the deletion in the audit log.
+                </>
+              ) : (
+                <>
+                  This will mark invoice{" "}
+                  <strong className="font-mono text-md-on-surface">
+                    {voidConfirmInvoice.invoice.invoiceNumber}
+                  </strong>{" "}
+                  for {voidConfirmInvoice.invoice.customerName} as
+                  Cancelled/Voided in the immutable audit register.
+                </>
+              )}
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <Button
@@ -1088,21 +1162,23 @@ export default function InvoicesView({
               </Button>
               <Button
                 variant="filled"
-                onClick={() => {
-                  setInvoices((prev) =>
-                    prev.map((x) =>
-                      x.id === voidConfirmInvoice.id
-                        ? { ...x, status: "CANCELLED" }
-                        : x
-                    )
-                  );
-                  onShowSnackbar(
-                    `Voided invoice ${voidConfirmInvoice.invoiceNumber}`
-                  );
+                onClick={async () => {
+                  const target = voidConfirmInvoice;
                   setVoidConfirmInvoice(null);
+                  await syncInvoiceMutation(
+                    {
+                      action: target.mode,
+                      invoiceId: target.invoice.id,
+                    },
+                    target.mode === "DELETE"
+                      ? `Deleted invoice ${target.invoice.invoiceNumber}`
+                      : `Voided invoice ${target.invoice.invoiceNumber}`
+                  );
                 }}
               >
-                Confirm void
+                {voidConfirmInvoice.mode === "DELETE"
+                  ? "Confirm delete"
+                  : "Confirm void"}
               </Button>
             </div>
           </Card>

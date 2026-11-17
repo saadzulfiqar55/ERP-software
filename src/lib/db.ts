@@ -14,6 +14,7 @@ import {
   maskMongoUri,
   resolveIsolatedDbName,
 } from "./mongodb";
+import { ERPInvoice, INITIAL_ERP_INVOICES } from "./mock/erp-data";
 import {
   ActiveSession,
   CashierShift,
@@ -36,6 +37,7 @@ export interface DatabaseSchema {
   mongoConfig: MongoDBConfig;
   products: Product[];
   orders: Order[];
+  erpInvoices?: ERPInvoice[];
   parties: PartyAccount[];
   ledger: LedgerEntry[];
   users: UserProfile[];
@@ -142,6 +144,7 @@ export function readDb(): DatabaseSchema {
     mongoConfig: DEFAULT_MONGO_CONFIG,
     products: INITIAL_PRODUCTS,
     orders: INITIAL_ORDERS,
+    erpInvoices: INITIAL_ERP_INVOICES,
     parties: INITIAL_PARTIES,
     ledger: INITIAL_LEDGER,
     users: INITIAL_USERS,
@@ -188,6 +191,10 @@ export function readDb(): DatabaseSchema {
       ...defaults,
       ...parsed,
       users: parsed.users && parsed.users.length > 0 ? parsed.users : INITIAL_USERS,
+      erpInvoices:
+        parsed.erpInvoices && parsed.erpInvoices.length > 0
+          ? parsed.erpInvoices
+          : INITIAL_ERP_INVOICES,
       mongoConfig: envMongo || parsed.mongoConfig || DEFAULT_MONGO_CONFIG,
       sessionAuditLogs: parsed.sessionAuditLogs || [],
       immutableAuditLogs: parsed.immutableAuditLogs || defaults.immutableAuditLogs,

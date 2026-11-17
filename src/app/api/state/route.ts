@@ -1,23 +1,66 @@
 import { NextResponse } from "next/server";
 import { appendAuditLog } from "@/core/audit";
-import { resolveAuthenticatedActor } from "@/core/auth";
+import {
+  assertActorPermission,
+  hasGranularPermission,
+  tryResolveOptionalActor,
+} from "@/core/auth";
 import { withTransaction } from "@/core/db";
 import { toMinorUnits } from "@/core/money";
 import { sanitizeNoSqlPayload } from "@/core/validation";
-import { getPublicMongoConfig, readDb } from "@/lib/db";
+import { DatabaseSchema, getPublicMongoConfig, readDb } from "@/lib/db";
 import { isMaskedMongoUri, pingMongoConnection } from "@/lib/mongodb";
-import { MongoDBConfig, PRAConfig, Product } from "@/lib/types";
+import { MongoDBConfig, PRAConfig, Product, UserProfile } from "@/lib/types";
 import { AccountingService } from "@/modules/accounting/accounting.service";
 import { InventoryService } from "@/modules/inventory/inventory.service";
 
+function buildScopedStateResponse(
+  db: DatabaseSchema,
+  actor: UserProfile | null
+) {
+  const canViewLedger = actor
+    ? hasGranularPermission(actor.role, "accounting:ledger:view")
+    : false;
+  const canManageSettings = actor
+    ? hasGranularPermission(actor.role, "settings:pra:manage")
+    : false;
+
+  const activeParties = AccountingService.listActiveParties(db);
+  const scopedParties = canViewLedger
+    ? activeParties
+    : actor
+    ? activeParties
+        .filter((p) => p.type === "CUSTOMER")
+        .map((p) => ({
+          ...p,
+          currentBalance: 0,
+          currentBalanceMinor: 0,
+          creditLimit: 0,
+        }))
+    : [];
+
+  return {
+    ...db,
+    mongoConfig: canManageSettings
+      ? getPublicMongoConfig(db.mongoConfig)
+      : {
+          enabled: db.mongoConfig.enabled,
+          uri: "",
+          dbName: db.mongoConfig.dbName,
+          lastStatus: "Restricted to Owner / Super Admin",
+        },
+    products: InventoryService.listActiveProducts(db),
+    parties: scopedParties,
+    ledger: canViewLedger ? db.ledger : [],
+    immutableAuditLogs: canViewLedger ? db.immutableAuditLogs : [],
+    erpInvoices: db.erpInvoices || [],
+  };
+}
+
 export async function GET() {
   const db = readDb();
-  return NextResponse.json({
-    ...db,
-    mongoConfig: getPublicMongoConfig(db.mongoConfig),
-    products: InventoryService.listActiveProducts(db),
-    parties: AccountingService.listActiveParties(db),
-  });
+  const actor = await tryResolveOptionalActor(db);
+  return NextResponse.json(buildScopedStateResponse(db, actor));
 }
 
 export async function PUT(request: Request) {
@@ -25,10 +68,12 @@ export async function PUT(request: Request) {
     const rawBody = await request.json();
     const body = sanitizeNoSqlPayload(rawBody);
 
-    const { db } = await withTransaction(async (txDb) => {
-      const actor = await resolveAuthenticatedActor(txDb);
+    let resolvedActor: UserProfile | null = null;
 
+    const { db } = await withTransaction(async (txDb) => {
       if (body.praConfig) {
+        const actor = await assertActorPermission(txDb, "settings:pra:manage");
+        resolvedActor = actor;
         txDb.praConfig = {
           ...txDb.praConfig,
           ...(body.praConfig as Partial<PRAConfig>),
@@ -46,6 +91,8 @@ export async function PUT(request: Request) {
       }
 
       if (body.mongoConfig) {
+        const actor = await assertActorPermission(txDb, "settings:pra:manage");
+        resolvedActor = actor;
         const incoming = body.mongoConfig as Partial<MongoDBConfig>;
         const incomingUri = incoming.uri?.trim() || "";
         const isStaleLocalDefault =
@@ -76,6 +123,8 @@ export async function PUT(request: Request) {
       }
 
       if (body.newProduct) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
         InventoryService.upsertProduct(
           txDb,
           body.newProduct as Product,
@@ -85,6 +134,8 @@ export async function PUT(request: Request) {
       }
 
       if (body.editProduct) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
         InventoryService.upsertProduct(
           txDb,
           body.editProduct as Product,
@@ -94,7 +145,9 @@ export async function PUT(request: Request) {
       }
 
       if (body.deleteProductId) {
-        // Soft-archive per ERP Architecture Checklist Section 5 (Soft Deletes Only)
+        // Strictly Owner / Super Admin ONLY (`inventory:archive`)
+        const actor = await assertActorPermission(txDb, "inventory:archive");
+        resolvedActor = actor;
         InventoryService.archiveProductSoft(
           txDb,
           body.deleteProductId as string,
@@ -103,6 +156,8 @@ export async function PUT(request: Request) {
       }
 
       if (body.updateProductImage) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
         const { productId, imageUrl } = body.updateProductImage as {
           productId: string;
           imageUrl: string;
@@ -113,6 +168,8 @@ export async function PUT(request: Request) {
       }
 
       if (body.reconcileShift) {
+        const actor = await assertActorPermission(txDb, "pos:sale:create");
+        resolvedActor = actor;
         const { countedCashPkr } = body.reconcileShift as {
           countedCashPkr: number;
         };
@@ -141,16 +198,17 @@ export async function PUT(request: Request) {
       return true;
     });
 
-    return NextResponse.json({
-      ...db,
-      mongoConfig: getPublicMongoConfig(db.mongoConfig),
-      products: InventoryService.listActiveProducts(db),
-      parties: AccountingService.listActiveParties(db),
-    });
+    const actorForResponse =
+      resolvedActor || (await tryResolveOptionalActor(db));
+    return NextResponse.json(buildScopedStateResponse(db, actorForResponse));
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to update state" },
-      { status: 400 }
-    );
+    const message =
+      err instanceof Error ? err.message : "Failed to update state";
+    const status = message.includes("Access Denied")
+      ? 403
+      : message.includes("Authentication required")
+      ? 401
+      : 400;
+    return NextResponse.json({ error: message }, { status });
   }
 }

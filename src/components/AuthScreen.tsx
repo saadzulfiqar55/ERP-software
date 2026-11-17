@@ -10,6 +10,7 @@ import {
   Store,
 } from "lucide-react";
 import { Avatar, Button, Card, StatusChip, ThemeToggle } from "@/components/ui/m3";
+import { hasGranularPermission } from "@/core/auth/permissions";
 
 interface AuthScreenProps {
   users: UserProfile[];
@@ -243,31 +244,39 @@ export default function AuthScreen({
           <Card variant="tonal" className="mt-6 p-4! space-y-1.5">
             <div className="text-sm font-medium text-md-on-surface flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-md-primary" strokeWidth={1.8} />
-              {selectedUser.role} RBAC Module Permissions:
+              {selectedUser.role === "ADMIN" ? "OWNER / SUPER ADMIN" : selectedUser.role} RBAC Hierarchy Permissions:
             </div>
             <div className="grid grid-cols-2 gap-1.5 text-xs text-md-on-surface-variant pt-1">
               <span>
-                • PRA Config & Tax Rates:{" "}
+                • Ledger, Profiles &amp; Settings:{" "}
                 <strong className="text-md-on-surface">
-                  {selectedUser.permissions.canEditPraSettings ? "Full Admin" : "Read-Only"}
+                  {hasGranularPermission(selectedUser.role, "accounting:ledger:view")
+                    ? "Full Super Admin"
+                    : "Restricted"}
                 </strong>
               </span>
               <span>
-                • Menu & Stock Editing:{" "}
+                • Delete Items &amp; Void Invoices:{" "}
                 <strong className="text-md-on-surface">
-                  {selectedUser.permissions.canManageMenuPricing ? "Allowed" : "Restricted"}
+                  {hasGranularPermission(selectedUser.role, "invoices:delete")
+                    ? "Allowed"
+                    : "Super Admin Only"}
                 </strong>
               </span>
               <span>
-                • Bill Discounts:{" "}
+                • Menu &amp; Stock Editing:{" "}
                 <strong className="text-md-on-surface">
-                  {selectedUser.permissions.canApproveDiscounts ? "Allowed" : "Manager PIN"}
+                  {hasGranularPermission(selectedUser.role, "inventory:adjust")
+                    ? "Add / Edit Only"
+                    : "View Only"}
                 </strong>
               </span>
               <span>
-                • Invoices, Khata & Reports:{" "}
+                • POS &amp; Bill Discounts:{" "}
                 <strong className="text-md-on-surface">
-                  {selectedUser.permissions.canManageKhata ? "Full Access" : "POS Only"}
+                  {hasGranularPermission(selectedUser.role, "pos:discount:override")
+                    ? "POS + Discounts"
+                    : "Standard POS"}
                 </strong>
               </span>
             </div>

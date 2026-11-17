@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { appendAuditLog, DEFAULT_BRANCH_ID, DEFAULT_TENANT_ID } from "@/core/audit";
-import { resolveAuthenticatedActor } from "@/core/auth";
+import { assertActorPermission } from "@/core/auth";
 import { withTransaction } from "@/core/db";
 import { lookupIdempotencyRecord, storeIdempotencyRecord } from "@/core/idempotency";
 import { toMinorUnits } from "@/core/money";
@@ -21,10 +21,12 @@ export async function POST(request: Request) {
         return cached.responseBody;
       }
 
-      const actor = await resolveAuthenticatedActor(txDb);
+      // Strictly Owner / Super Admin ONLY for all Ledger / Khata operations
+      const actor = await assertActorPermission(txDb, "accounting:ledger:view");
 
       // 1. Toggle Fiscal Period Lock (`accounting:period:close`)
       if (body.action === "TOGGLE_FISCAL_PERIOD") {
+        await assertActorPermission(txDb, "accounting:period:close");
         const targetKey = body.periodKey as string;
         txDb.fiscalPeriods = (txDb.fiscalPeriods || []).map((fp) =>
           fp.periodKey === targetKey
@@ -113,6 +115,7 @@ export async function POST(request: Request) {
 
       // 4. Soft-Archive Party Account (`isArchived: true`)
       if (body.action === "DELETE_PARTY") {
+        await assertActorPermission(txDb, "accounting:journal:reverse");
         const targetPartyId = body.partyId as string;
         AccountingService.archivePartySoft(txDb, targetPartyId, actor);
         return { archivedPartyId: targetPartyId };
@@ -179,16 +182,19 @@ export async function POST(request: Request) {
 
       // 6. Reverse / Credit-Note or Void a Ledger Entry
       if (body.action === "REVERSE_ENTRY") {
+        await assertActorPermission(txDb, "accounting:journal:reverse");
         AccountingService.reverseOrVoidEntry(txDb, body.entryId as string, actor, false);
         return { reversed: true };
       }
 
       if (body.action === "DELETE_ENTRY") {
+        await assertActorPermission(txDb, "accounting:journal:reverse");
         AccountingService.reverseOrVoidEntry(txDb, body.entryId as string, actor, true);
         return { voided: true };
       }
 
       // 7. Default: Post Balanced Double-Entry Voucher
+      await assertActorPermission(txDb, "accounting:journal:post");
       const entry = AccountingService.postVoucher(
         txDb,
         {
@@ -216,9 +222,13 @@ export async function POST(request: Request) {
       },
     });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to process ledger action" },
-      { status: 400 }
-    );
+    const message =
+      err instanceof Error ? err.message : "Failed to process ledger action";
+    const status = message.includes("Access Denied")
+      ? 403
+      : message.includes("Authentication required")
+      ? 401
+      : 400;
+    return NextResponse.json({ error: message }, { status });
   }
 }

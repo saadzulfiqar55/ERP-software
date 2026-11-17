@@ -30,10 +30,13 @@ export type ERPPermission =
   | "inventory:view"
   | "inventory:adjust"
   | "inventory:archive"
+  | "invoices:delete"
+  | "accounting:ledger:view"
   | "accounting:journal:post"
   | "accounting:journal:reverse"
   | "accounting:period:close"
-  | "settings:pra:manage";
+  | "settings:pra:manage"
+  | "users:manage";
 
 export interface UserProfile {
   id: string;

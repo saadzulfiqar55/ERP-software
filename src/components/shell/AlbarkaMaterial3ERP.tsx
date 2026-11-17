@@ -54,6 +54,7 @@ import {
   ProductVariant,
   SessionAuditLog,
   UserProfile,
+  UserRole,
 } from "@/lib/types";
 import {
   INITIAL_LEDGER,
@@ -76,6 +77,7 @@ import {
   Card,
   CompactField,
   CompactSelect,
+  EmptyState,
   ExtendedFab,
   FilterChip,
   NavItem,
@@ -309,6 +311,14 @@ export function AlbarkaMaterial3ERP({
   const [newProdStock, setNewProdStock] = useState<string>("100");
   const [newProdImageUrl, setNewProdImageUrl] = useState<string>("");
 
+  // Super Admin Staff Profile Management Form
+  const [newProfileName, setNewProfileName] = useState<string>("");
+  const [newProfileRole, setNewProfileRole] = useState<UserRole>("CASHIER");
+  const [newProfileTitle, setNewProfileTitle] = useState<string>("");
+  const [newProfileEmail, setNewProfileEmail] = useState<string>("");
+  const [newProfilePin, setNewProfilePin] = useState<string>("");
+  const [savingProfile, setSavingProfile] = useState<boolean>(false);
+
   // Global Ctrl+K shortcut to open Command Palette
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -321,28 +331,31 @@ export function AlbarkaMaterial3ERP({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  async function fetchScopedState() {
+    const stateRes = await fetch("/api/state");
+    if (!stateRes.ok) return;
+    const data = await stateRes.json();
+    setPraConfig(data.praConfig);
+    if (data.mongoConfig) setMongoConfig(data.mongoConfig);
+    setProducts(data.products);
+    setOrders(data.orders);
+    if (data.erpInvoices) setErpInvoices(data.erpInvoices);
+    setParties(data.parties);
+    setLedger(data.ledger || []);
+    if (data.users) setUsers(data.users);
+    setImmutableAuditLogs(data.immutableAuditLogs || []);
+    if (data.cashierShifts) setCashierShifts(data.cashierShifts);
+    if (data.fiscalPeriods) setFiscalPeriods(data.fiscalPeriods);
+  }
+
   // Load State + Verify JWT Cookie Session on Mount
   useEffect(() => {
     async function initApp() {
       try {
-        const [stateRes, authRes] = await Promise.all([
-          fetch("/api/state"),
+        const [, authRes] = await Promise.all([
+          fetchScopedState(),
           fetch("/api/auth"),
         ]);
-        if (stateRes.ok) {
-          const data = await stateRes.json();
-          setPraConfig(data.praConfig);
-          if (data.mongoConfig) setMongoConfig(data.mongoConfig);
-          setProducts(data.products);
-          setOrders(data.orders);
-          setParties(data.parties);
-          setLedger(data.ledger);
-          if (data.users) setUsers(data.users);
-          if (data.immutableAuditLogs)
-            setImmutableAuditLogs(data.immutableAuditLogs);
-          if (data.cashierShifts) setCashierShifts(data.cashierShifts);
-          if (data.fiscalPeriods) setFiscalPeriods(data.fiscalPeriods);
-        }
         if (authRes.ok) {
           const authData = await authRes.json();
           setActiveSession(authData.activeSession || null);
@@ -376,6 +389,9 @@ export function AlbarkaMaterial3ERP({
       setSessionAuditLogs(data.sessionAuditLogs || []);
       setActiveSession(null);
       setCurrentUser(null);
+      setLedger([]);
+      setImmutableAuditLogs([]);
+      setActiveNav("dashboard");
     }
   }
 
@@ -1056,12 +1072,67 @@ export function AlbarkaMaterial3ERP({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ deleteProductId: productId }),
     });
+    const data = await res.json();
     if (res.ok) {
-      const data = await res.json();
       setProducts(data.products);
       if (editingProductId === productId) cancelEditingProduct();
       notifySaved(`Archived "${productName}" from menu catalog.`);
+    } else {
+      notifySaved(data.error || "Only Owner / Super Admin can archive items.");
     }
+  }
+
+  async function handleCreateProfile(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newProfileName.trim() || !newProfileEmail.trim() || !newProfilePin.trim()) {
+      notifySaved("Fill in Name, Email, and 4-digit PIN.");
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "CREATE",
+          name: newProfileName.trim(),
+          role: newProfileRole,
+          title: newProfileTitle.trim(),
+          email: newProfileEmail.trim(),
+          pin: newProfilePin.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        notifySaved(data.error || "Failed to add profile.");
+        return;
+      }
+      if (data.users) setUsers(data.users);
+      if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
+      setNewProfileName("");
+      setNewProfileTitle("");
+      setNewProfileEmail("");
+      setNewProfilePin("");
+      notifySaved(`Added ${newProfileRole} profile "${data.user.name}".`);
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  async function handleDeleteProfile(userId: string, userName: string) {
+    const res = await fetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "DELETE", userId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      notifySaved(data.error || "Failed to remove profile.");
+      return;
+    }
+    if (data.users) setUsers(data.users);
+    if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
+    notifySaved(`Removed profile "${userName}".`);
   }
 
   function exportPRACsv() {
@@ -1121,10 +1192,40 @@ export function AlbarkaMaterial3ERP({
           setCurrentUser(user);
           setActiveSession(ses);
           setSessionAuditLogs(logs);
+          if (!hasGranularPermission(user.role, "settings:pra:manage")) {
+            setSettingsSubTab("APPEARANCE");
+          }
+          void fetchScopedState();
         }}
       />
     );
   }
+
+  const isSuperAdmin = currentUser.role === "ADMIN";
+  const canViewLedger = hasGranularPermission(
+    currentUser.role,
+    "accounting:ledger:view"
+  );
+  const canManageInventory = hasGranularPermission(
+    currentUser.role,
+    "inventory:adjust"
+  );
+  const canArchiveInventory = hasGranularPermission(
+    currentUser.role,
+    "inventory:archive"
+  );
+  const canDeleteInvoices = hasGranularPermission(
+    currentUser.role,
+    "invoices:delete"
+  );
+  const canManageUsers = hasGranularPermission(
+    currentUser.role,
+    "users:manage"
+  );
+  const canManagePra = hasGranularPermission(
+    currentUser.role,
+    "settings:pra:manage"
+  );
 
   // Permission-filtered navigation items (Section 3 requirement)
   const permittedNavItems = ERP_NAVIGATION_ITEMS.filter((item) =>
@@ -1264,26 +1365,30 @@ export function AlbarkaMaterial3ERP({
                 >
                   New sales order (POS)
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveNav("purchasing");
-                    setCreateMenuOpen(false);
-                  }}
-                  className="w-full px-4 py-2.5 text-left hover:bg-md-surface-container-low text-md-on-surface"
-                >
-                  New purchase order
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveNav("inventory");
-                    setCreateMenuOpen(false);
-                  }}
-                  className="w-full px-4 py-2.5 text-left hover:bg-md-surface-container-low text-md-on-surface"
-                >
-                  New product
-                </button>
+                {canViewLedger && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveNav("purchasing");
+                      setCreateMenuOpen(false);
+                    }}
+                    className="w-full px-4 py-2.5 text-left hover:bg-md-surface-container-low text-md-on-surface"
+                  >
+                    New purchase order
+                  </button>
+                )}
+                {canManageInventory && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveNav("inventory");
+                      setCreateMenuOpen(false);
+                    }}
+                    className="w-full px-4 py-2.5 text-left hover:bg-md-surface-container-low text-md-on-surface"
+                  >
+                    New product
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1487,17 +1592,19 @@ export function AlbarkaMaterial3ERP({
                     {currentUser.email} · {currentUser.role}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveNav("settings");
-                    setSettingsSubTab("RESTAURANT_PROFILES");
-                    setAvatarMenuOpen(false);
-                  }}
-                  className="w-full px-4 py-2.5 text-left hover:bg-md-surface-container-low text-md-on-surface"
-                >
-                  Profile & role permissions
-                </button>
+                {canManageUsers && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveNav("settings");
+                      setSettingsSubTab("RESTAURANT_PROFILES");
+                      setAvatarMenuOpen(false);
+                    }}
+                    className="w-full px-4 py-2.5 text-left hover:bg-md-surface-container-low text-md-on-surface"
+                  >
+                    Profile &amp; role permissions
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -1507,7 +1614,7 @@ export function AlbarkaMaterial3ERP({
                   }}
                   className="w-full px-4 py-2.5 text-left hover:bg-md-surface-container-low text-md-on-surface"
                 >
-                  Switch company / JWT session
+                  {isSuperAdmin ? "Switch company / JWT session" : "Active JWT session"}
                 </button>
                 <div className="my-1 border-t border-md-divider" />
                 <button
@@ -1550,6 +1657,7 @@ export function AlbarkaMaterial3ERP({
               products={products}
               invoices={erpInvoices}
               onInvoicesChange={setErpInvoices}
+              canDeleteInvoices={canDeleteInvoices}
               onShowSnackbar={notifySaved}
             />
           )}
@@ -1632,9 +1740,7 @@ export function AlbarkaMaterial3ERP({
                         >
                           <DishVisual
                             product={product}
-                            canEditImage={
-                              currentUser.permissions.canManageMenuPricing
-                            }
+                            canEditImage={canManageInventory}
                             onImageUpload={handleUpdateProductImage}
                           />
                           <div className="mt-3 px-0.5">
@@ -1996,7 +2102,8 @@ export function AlbarkaMaterial3ERP({
               />
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <Card className="lg:col-span-4 space-y-4 h-fit">
+                {canManageInventory && (
+                  <Card className="lg:col-span-4 space-y-4 h-fit">
                   <div className="flex items-center justify-between">
                     <h2 className="text-base font-semibold text-md-on-surface">
                       {editingProductId
@@ -2086,8 +2193,13 @@ export function AlbarkaMaterial3ERP({
                     </Button>
                   </form>
                 </Card>
+                )}
 
-                <Card className="lg:col-span-8 p-0! overflow-hidden">
+                <Card
+                  className={`${
+                    canManageInventory ? "lg:col-span-8" : "lg:col-span-12"
+                  } p-0! overflow-hidden`}
+                >
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                       <thead>
@@ -2145,24 +2257,33 @@ export function AlbarkaMaterial3ERP({
                             </td>
                             <td className="py-3 px-4 text-right">
                               <div className="inline-flex items-center gap-1">
-                                <Button
-                                  variant="icon"
-                                  aria-label="Edit item"
-                                  onClick={() => startEditingProduct(p)}
-                                  className="w-9! h-9!"
-                                >
-                                  <Pencil className="w-4 h-4" strokeWidth={1.8} />
-                                </Button>
-                                <Button
-                                  variant="icon"
-                                  aria-label="Archive item"
-                                  onClick={() =>
-                                    handleDeleteProduct(p.id, p.name)
-                                  }
-                                  className="w-9! h-9!"
-                                >
-                                  <Trash2 className="w-4 h-4" strokeWidth={1.8} />
-                                </Button>
+                                {canManageInventory && (
+                                  <Button
+                                    variant="icon"
+                                    aria-label="Edit item"
+                                    onClick={() => startEditingProduct(p)}
+                                    className="w-9! h-9!"
+                                  >
+                                    <Pencil className="w-4 h-4" strokeWidth={1.8} />
+                                  </Button>
+                                )}
+                                {canArchiveInventory && (
+                                  <Button
+                                    variant="icon"
+                                    aria-label="Archive item"
+                                    onClick={() =>
+                                      handleDeleteProduct(p.id, p.name)
+                                    }
+                                    className="w-9! h-9!"
+                                  >
+                                    <Trash2 className="w-4 h-4" strokeWidth={1.8} />
+                                  </Button>
+                                )}
+                                {!canManageInventory && !canArchiveInventory && (
+                                  <span className="text-xs text-md-on-surface-variant">
+                                    Read-only
+                                  </span>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -2176,11 +2297,19 @@ export function AlbarkaMaterial3ERP({
           )}
 
           {/* =============================================================== */}
-          {/* ACCOUNTING & DOUBLE-ENTRY KHATA LEDGER                          */}
+          {/* ACCOUNTING & DOUBLE-ENTRY KHATA LEDGER (SUPER ADMIN ONLY)       */}
           {/* =============================================================== */}
           {(activeNav === "accounting" ||
             activeNav === "purchasing" ||
-            activeNav === "hr") && (
+            activeNav === "hr") &&
+            (!canViewLedger ? (
+              <Card>
+                <EmptyState
+                  title="Owner / Super Admin authorization required"
+                  subtitle="Ledger journals, Khata balances, and supplier payables are restricted to Owner / Super Admin profiles."
+                />
+              </Card>
+            ) : (
             <div className="space-y-6">
               <PageHeader
                 title={
@@ -2512,7 +2641,7 @@ export function AlbarkaMaterial3ERP({
                 </div>
               </div>
             </div>
-          )}
+            ))}
 
           {/* =============================================================== */}
           {/* REPORTS, Z-CLOSING & SALES TAX CALCULATOR                       */}
@@ -2663,15 +2792,17 @@ export function AlbarkaMaterial3ERP({
               <div className="flex flex-wrap gap-2">
                 {(
                   [
-                    { id: "PRA_INTEGRATION", label: "PRA e-IMS" },
-                    { id: "TAX_RULES", label: "Tax rules" },
-                    { id: "SESSION_JWT_MANAGER", label: "JWT & session lock" },
-                    { id: "MONGODB_DATABASE", label: "MongoDB" },
-                    { id: "RESTAURANT_PROFILES", label: "Staff roles" },
-                    { id: "ERP_AUDIT_COMPLIANCE", label: "Audit trail" },
-                    { id: "APPEARANCE", label: "Appearance" },
+                    { id: "PRA_INTEGRATION", label: "PRA e-IMS", visible: canManagePra },
+                    { id: "TAX_RULES", label: "Tax rules", visible: canManagePra },
+                    { id: "MONGODB_DATABASE", label: "MongoDB", visible: canManagePra },
+                    { id: "RESTAURANT_PROFILES", label: "Staff roles & profiles", visible: canManageUsers },
+                    { id: "ERP_AUDIT_COMPLIANCE", label: "Audit trail", visible: canViewLedger },
+                    { id: "SESSION_JWT_MANAGER", label: "JWT & session lock", visible: true },
+                    { id: "APPEARANCE", label: "Appearance", visible: true },
                   ] as const
-                ).map((tab) => (
+                )
+                  .filter((tab) => tab.visible)
+                  .map((tab) => (
                   <FilterChip
                     key={tab.id}
                     label={tab.label}
@@ -2681,7 +2812,7 @@ export function AlbarkaMaterial3ERP({
                 ))}
               </div>
 
-              {settingsSubTab === "PRA_INTEGRATION" && (
+              {settingsSubTab === "PRA_INTEGRATION" && canManagePra && (
                 <Card className="space-y-5">
                   <div className="flex items-center justify-between">
                     <h2 className="text-base font-semibold text-md-on-surface">
@@ -2723,7 +2854,7 @@ export function AlbarkaMaterial3ERP({
                 </Card>
               )}
 
-              {settingsSubTab === "TAX_RULES" && (
+              {settingsSubTab === "TAX_RULES" && canManagePra && (
                 <Card className="space-y-5">
                   <h2 className="text-base font-semibold text-md-on-surface">
                     Sales tax tariff & service charge rules
@@ -2789,7 +2920,7 @@ export function AlbarkaMaterial3ERP({
                 </Card>
               )}
 
-              {settingsSubTab === "MONGODB_DATABASE" && (
+              {settingsSubTab === "MONGODB_DATABASE" && canManagePra && (
                 <Card className="space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-base font-semibold text-md-on-surface">
@@ -2834,26 +2965,144 @@ export function AlbarkaMaterial3ERP({
                 </Card>
               )}
 
-              {settingsSubTab === "RESTAURANT_PROFILES" && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {users.map((u) => (
-                    <Card key={u.id} className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <StatusChip label={u.role} variant="primary" />
-                        <span className="font-mono text-xs text-md-on-surface-variant">
-                          PIN: {u.pin}
-                        </span>
+              {settingsSubTab === "RESTAURANT_PROFILES" && canManageUsers && (
+                <div className="space-y-6">
+                  {/* Add Staff Profile Form (Owner / Super Admin Only) */}
+                  <Card className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h2 className="text-base font-semibold text-md-on-surface">
+                          Add new workspace profile
+                        </h2>
+                        <p className="text-xs text-md-on-surface-variant mt-0.5">
+                          Super Admin hierarchy: only Owner / Super Admin profiles can create or remove staff, delete items/invoices, or view the financial ledger.
+                        </p>
                       </div>
-                      <div className="font-medium text-base">{u.name}</div>
-                      <div className="text-xs text-md-on-surface-variant">
-                        {u.title}
+                      <StatusChip label="Super Admin Control" variant="primary" />
+                    </div>
+
+                    <form onSubmit={handleCreateProfile} className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                        <OutlinedTextField
+                          label="Full name"
+                          required
+                          placeholder="e.g. Bilal Ahmed"
+                          value={newProfileName}
+                          onChange={setNewProfileName}
+                        />
+                        <OutlinedTextField
+                          label="Hierarchy role"
+                          value={newProfileRole}
+                          onChange={(v) => setNewProfileRole(v as UserRole)}
+                          options={[
+                            { value: "CASHIER", label: "CASHIER (POS Only)" },
+                            { value: "MANAGER", label: "MANAGER (Floor Ops)" },
+                            { value: "ADMIN", label: "ADMIN (Super Admin)" },
+                          ]}
+                        />
+                        <OutlinedTextField
+                          label="Job title"
+                          placeholder="e.g. Evening Cashier"
+                          value={newProfileTitle}
+                          onChange={setNewProfileTitle}
+                        />
+                        <OutlinedTextField
+                          label="Work email"
+                          type="email"
+                          required
+                          placeholder="name@albarkarestaurant.pk"
+                          value={newProfileEmail}
+                          onChange={setNewProfileEmail}
+                        />
+                        <OutlinedTextField
+                          label="4-digit PIN"
+                          mono
+                          required
+                          placeholder="4444"
+                          value={newProfilePin}
+                          onChange={setNewProfilePin}
+                        />
                       </div>
-                    </Card>
-                  ))}
+                      <Button
+                        type="submit"
+                        variant="filled"
+                        disabled={savingProfile}
+                        icon={<Plus className="w-4 h-4" strokeWidth={1.8} />}
+                      >
+                        {savingProfile ? "Saving profile…" : "Add staff profile"}
+                      </Button>
+                    </form>
+                  </Card>
+
+                  {/* Existing Staff Profiles Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {users.map((u) => {
+                      const isSelf = u.id === currentUser.id;
+                      const adminCount = users.filter((x) => x.role === "ADMIN").length;
+                      const cannotRemove = isSelf || (u.role === "ADMIN" && adminCount <= 1);
+                      return (
+                        <Card key={u.id} className="space-y-3 flex flex-col justify-between">
+                          <div className="space-y-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <StatusChip
+                                label={
+                                  u.role === "ADMIN"
+                                    ? "OWNER / SUPER ADMIN"
+                                    : u.role
+                                }
+                                variant={
+                                  u.role === "ADMIN"
+                                    ? "primary"
+                                    : u.role === "MANAGER"
+                                    ? "success"
+                                    : "neutral"
+                                }
+                              />
+                              <span className="font-mono text-xs text-md-on-surface-variant">
+                                PIN: {u.pin}
+                              </span>
+                            </div>
+                            <div>
+                              <div className="font-medium text-base text-md-on-surface">
+                                {u.name}
+                              </div>
+                              <div className="text-xs text-md-on-surface-variant">
+                                {u.title} · {u.email}
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-md-on-surface-variant pt-1">
+                              {u.role === "ADMIN"
+                                ? "Full access: Ledger, Deletes/Voids, MongoDB, PRA & Profiles"
+                                : u.role === "MANAGER"
+                                ? "POS, Discounts & Menu edits (No Ledger or Deletes)"
+                                : "POS Terminal & Read-only Catalog (No Ledger or Deletes)"}
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-md-divider flex items-center justify-between">
+                            <span className="text-[11px] text-md-on-surface-variant">
+                              {isSelf ? "Active session holder" : "Workspace profile"}
+                            </span>
+                            {!cannotRemove && (
+                              <Button
+                                variant="text"
+                                size="sm"
+                                icon={<Trash2 className="w-3.5 h-3.5 text-md-error" strokeWidth={1.8} />}
+                                onClick={() => handleDeleteProfile(u.id, u.name)}
+                                className="text-md-error!"
+                              >
+                                Remove
+                              </Button>
+                            )}
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
-              {settingsSubTab === "ERP_AUDIT_COMPLIANCE" && (
+              {settingsSubTab === "ERP_AUDIT_COMPLIANCE" && canViewLedger && (
                 <Card className="p-0! overflow-hidden">
                   <div className="p-4 border-b border-md-divider">
                     <h2 className="text-base font-semibold text-md-on-surface">
@@ -2925,6 +3174,7 @@ export function AlbarkaMaterial3ERP({
         products={products}
         orders={orders}
         parties={parties}
+        userRole={currentUser.role}
       />
 
       {/* Material 3 Bottom-Left Snackbar */}
