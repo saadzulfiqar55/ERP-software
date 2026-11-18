@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -25,64 +25,109 @@ import {
   StatusChip,
 } from "@/components/ui/m3";
 import {
+  ERPInvoice,
   INITIAL_MONTHLY_REVENUE,
-  INITIAL_STOCK_MONITOR,
-  INITIAL_WAITING_TASKS,
   StockLevelMonitorItem,
   WaitingTaskItem,
 } from "@/lib/mock/erp-data";
-import { Order } from "@/lib/types";
+import { Order, PartyAccount } from "@/lib/types";
 import { formatIsoDate, formatMinorMoney } from "@/lib/format";
 
 interface DashboardViewProps {
   orders: Order[];
+  erpInvoices: ERPInvoice[];
+  parties: PartyAccount[];
+  tasks: WaitingTaskItem[];
+  stockItems: StockLevelMonitorItem[];
+  canViewLedger?: boolean;
+  canAdjustStock?: boolean;
+  onApproveTask: (task: WaitingTaskItem) => void;
+  onReorderStock: (item: StockLevelMonitorItem) => void;
   onNavigate: (section: string) => void;
-  onShowSnackbar: (msg: string) => void;
   onSelectOrderReceipt?: (order: Order) => void;
 }
 
 export default function DashboardView({
   orders,
+  erpInvoices,
+  parties,
+  tasks,
+  stockItems,
+  canViewLedger = false,
+  canAdjustStock = false,
+  onApproveTask,
+  onReorderStock,
   onNavigate,
-  onShowSnackbar,
   onSelectOrderReceipt,
 }: DashboardViewProps) {
   const [range, setRange] = useState<"today" | "week" | "month" | "quarter">(
     "month"
   );
-  const [tasks, setTasks] = useState<WaitingTaskItem[]>(INITIAL_WAITING_TASKS);
-  const [stockItems, setStockItems] = useState<StockLevelMonitorItem[]>(
-    INITIAL_STOCK_MONITOR
-  );
   const [hoveredMonth, setHoveredMonth] = useState<string | null>(null);
 
-  const pendingTasks = tasks.filter((t) => t.status === "PENDING");
+  const pendingTasks = useMemo(
+    () =>
+      tasks.filter((t) => {
+        if (t.status !== "PENDING") return false;
+        if (
+          !canViewLedger &&
+          (t.type === "OVERDUE_ALERT" || t.type === "PERIOD_CLOSE")
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [tasks, canViewLedger]
+  );
 
   const rangeMultiplier =
     range === "today" ? 0.08 : range === "week" ? 0.28 : range === "quarter" ? 2.85 : 1;
 
-  const revenueMinor = Math.round(253200000 * rangeMultiplier);
+  const liveOrdersRevenueMinor = useMemo(
+    () =>
+      orders.reduce((sum, o) => sum + Math.round(o.taxBreakdown.grandTotal * 100), 0),
+    [orders]
+  );
+  const revenueMinor = Math.round(
+    (253200000 + liveOrdersRevenueMinor) * rangeMultiplier
+  );
+
+  const openInvoices = useMemo(
+    () =>
+      erpInvoices.filter(
+        (inv) => inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "DRAFT"
+      ),
+    [erpInvoices]
+  );
+  const overdueInvoices = useMemo(
+    () => erpInvoices.filter((inv) => inv.status === "OVERDUE"),
+    [erpInvoices]
+  );
+  const receivablesOutstandingMinor = useMemo(() => {
+    const invoiceDueMinor = openInvoices.reduce(
+      (sum, inv) => sum + inv.amountMinor,
+      0
+    );
+    const partyReceivablesMinor = canViewLedger
+      ? parties
+          .filter((p) => p.type === "CUSTOMER" && p.currentBalance > 0)
+          .reduce((sum, p) => sum + Math.round(p.currentBalance * 100), 0)
+      : 0;
+    return invoiceDueMinor + partyReceivablesMinor;
+  }, [openInvoices, parties, canViewLedger]);
+
+  const lowStockItems = useMemo(
+    () => stockItems.filter((s) => s.currentQty / s.reorderTarget < 0.35),
+    [stockItems]
+  );
+  const criticalStockCount = useMemo(
+    () => stockItems.filter((s) => s.currentQty / s.reorderTarget < 0.15).length,
+    [stockItems]
+  );
+
   const maxBarMinor = Math.max(
     ...INITIAL_MONTHLY_REVENUE.map((m) => m.revenueMinor)
   );
-
-  function handleApproveTask(task: WaitingTaskItem) {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, status: "APPROVED" } : t))
-    );
-    onShowSnackbar(`Approved ${task.referenceCode} (${task.title})`);
-  }
-
-  function handleReorderStock(item: StockLevelMonitorItem) {
-    setStockItems((prev) =>
-      prev.map((s) =>
-        s.id === item.id ? { ...s, currentQty: s.reorderTarget } : s
-      )
-    );
-    onShowSnackbar(
-      `Purchase requisition created for ${item.name} (Restocked to ${item.reorderTarget} ${item.unit})`
-    );
-  }
 
   return (
     <div className="space-y-6">
@@ -122,27 +167,27 @@ export default function DashboardView({
           caption="vs last month"
         />
         <StatCard
-          label="Open sales orders"
-          value="48"
+          label="Sales orders & open bills"
+          value={`${orders.length + openInvoices.length}`}
           icon={<ShoppingBag className="w-5 h-5" strokeWidth={1.8} />}
-          chipLabel="48 active"
+          chipLabel={`${orders.length} POS`}
           chipVariant="primary"
-          caption="ready to ship"
+          caption={`${openInvoices.length} open invoices`}
         />
         <StatCard
           label="Receivables outstanding"
-          value={formatMinorMoney(12670000, "PKR")}
+          value={formatMinorMoney(receivablesOutstandingMinor, "PKR")}
           icon={<Wallet className="w-5 h-5" strokeWidth={1.8} />}
-          chipLabel="18 overdue"
-          chipVariant="error"
-          caption="past due terms"
+          chipLabel={`${overdueInvoices.length} overdue`}
+          chipVariant={overdueInvoices.length > 0 ? "error" : "success"}
+          caption="across invoices & Khata"
         />
         <StatCard
           label="Low-stock items"
-          value={`${stockItems.filter((s) => s.currentQty / s.reorderTarget < 0.35).length}`}
+          value={`${lowStockItems.length}`}
           icon={<Package className="w-5 h-5" strokeWidth={1.8} />}
-          chipLabel="6 critical"
-          chipVariant="warning"
+          chipLabel={`${criticalStockCount} critical`}
+          chipVariant={criticalStockCount > 0 ? "warning" : "success"}
           caption="below reorder threshold"
         />
       </div>
@@ -289,30 +334,40 @@ export default function DashboardView({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 pl-13">
-                        <Button
-                          variant="filled"
-                          size="sm"
-                          onClick={() => handleApproveTask(task)}
-                        >
-                          Approve
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          size="sm"
-                          onClick={() => {
-                            if (task.type === "OVERDUE_ALERT") {
-                              onNavigate("invoices");
-                            } else if (task.type === "PO_APPROVAL") {
-                              onNavigate("purchasing");
-                            } else {
-                              onNavigate("accounting");
-                            }
-                          }}
-                        >
-                          Review
-                        </Button>
-                      </div>
+                      {(canAdjustStock || canViewLedger) && (
+                        <div className="flex items-center gap-2 pl-13">
+                          {(canViewLedger ||
+                            (task.type !== "OVERDUE_ALERT" &&
+                              task.type !== "PERIOD_CLOSE")) && (
+                            <Button
+                              variant="filled"
+                              size="sm"
+                              onClick={() => onApproveTask(task)}
+                            >
+                              Approve
+                            </Button>
+                          )}
+                          <Button
+                            variant="outlined"
+                            size="sm"
+                            onClick={() => {
+                              if (task.type === "OVERDUE_ALERT") {
+                                onNavigate("invoices");
+                              } else if (canViewLedger) {
+                                onNavigate(
+                                  task.type === "PO_APPROVAL"
+                                    ? "purchasing"
+                                    : "accounting"
+                                );
+                              } else {
+                                onNavigate("inventory");
+                              }
+                            }}
+                          >
+                            Review
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -412,11 +467,11 @@ export default function DashboardView({
                       <span className="text-xs font-mono tabular-nums text-md-on-surface-variant">
                         {stk.currentQty} / {stk.reorderTarget} {stk.unit} ({pct}%)
                       </span>
-                      {pct < 35 && (
+                      {pct < 35 && canAdjustStock && (
                         <Button
                           variant="text"
                           size="sm"
-                          onClick={() => handleReorderStock(stk)}
+                          onClick={() => onReorderStock(stk)}
                           className="h-7! px-2! text-xs!"
                         >
                           Reorder

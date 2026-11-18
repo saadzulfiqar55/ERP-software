@@ -207,7 +207,7 @@ export async function POST(request: Request) {
       });
 
       return { user: sanitizeUserForClient(created, actor), actor };
-    }).then(({ result: inner, db: nextDb }) => ({
+    }, ["USERS", "SESSIONS", "IMMUTABLE_AUDIT_LOGS"]).then(({ result: inner, db: nextDb }) => ({
       result: inner,
       db: nextDb,
       actorRef: inner.actor,

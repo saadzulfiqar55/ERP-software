@@ -63,6 +63,8 @@ function buildScopedStateResponse(
     ledger: canViewLedger ? db.ledger : [],
     immutableAuditLogs: canViewLedger ? db.immutableAuditLogs : [],
     erpInvoices: db.erpInvoices || [],
+    waitingTasks: db.waitingTasks || [],
+    stockMonitor: db.stockMonitor || [],
   };
 }
 
@@ -204,8 +206,58 @@ export async function PUT(request: Request) {
         }
       }
 
+      if (body.approveTaskId) {
+        const taskId = String(body.approveTaskId);
+        const targetTask = (txDb.waitingTasks || []).find((t) => t.id === taskId);
+        if (!targetTask) {
+          throw new Error("Task not found.");
+        }
+        const requiredPerm =
+          targetTask.type === "OVERDUE_ALERT" || targetTask.type === "PERIOD_CLOSE"
+            ? "accounting:ledger:view"
+            : "inventory:adjust";
+        const actor = await assertActorPermission(txDb, requiredPerm);
+        resolvedActor = actor;
+        txDb.waitingTasks = (txDb.waitingTasks || []).map((t) =>
+          t.id === taskId ? { ...t, status: "APPROVED" } : t
+        );
+        appendAuditLog(txDb, {
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          module: "SETTINGS",
+          action: "UPDATE",
+          entityType: "WaitingTask",
+          entityId: taskId,
+          summary: `Approved ${targetTask.referenceCode}: ${targetTask.title}.`,
+        });
+      }
+
+      if (body.reorderStockId) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
+        const stockId = String(body.reorderStockId);
+        const item = (txDb.stockMonitor || []).find((s) => s.id === stockId);
+        if (!item) {
+          throw new Error("Stock item not found.");
+        }
+        txDb.stockMonitor = (txDb.stockMonitor || []).map((s) =>
+          s.id === stockId ? { ...s, currentQty: s.reorderTarget } : s
+        );
+        appendAuditLog(txDb, {
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          module: "INVENTORY",
+          action: "UPDATE",
+          entityType: "StockMonitor",
+          entityId: stockId,
+          summary: `Restocked "${item.name}" to ${item.reorderTarget} ${item.unit}.`,
+        });
+      }
+
       return true;
-    });
+    }, ["PRODUCTS", "CASHIER_SHIFTS", "IMMUTABLE_AUDIT_LOGS"]);
 
     const actorForResponse =
       resolvedActor || (await tryResolveOptionalActor(db));

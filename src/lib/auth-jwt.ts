@@ -73,11 +73,18 @@ export function verifyJwt(token: string): JWTPayload | null {
     const [encodedHeader, encodedPayload, encodedSignature] = parts;
     const signingInput = `${encodedHeader}.${encodedPayload}`;
 
-    const expectedSig = base64UrlEncode(
-      crypto.createHmac("sha256", JWT_SECRET).update(signingInput).digest()
+    const expectedBuf = Buffer.from(
+      base64UrlEncode(
+        crypto.createHmac("sha256", JWT_SECRET).update(signingInput).digest()
+      ),
+      "utf-8"
     );
+    const actualBuf = Buffer.from(encodedSignature, "utf-8");
 
-    if (expectedSig !== encodedSignature) {
+    if (
+      expectedBuf.length !== actualBuf.length ||
+      !crypto.timingSafeEqual(expectedBuf, actualBuf)
+    ) {
       return null;
     }
 

@@ -26,10 +26,34 @@ export const MONGODB_COLLECTIONS = {
   FISCAL_PERIODS: "fiscal_periods",
 } as const;
 
+export type MongoSyncSection = keyof typeof MONGODB_COLLECTIONS;
+
 declare global {
   // Global singleton cache for MongoClient pools across Next.js hot reloads
   // eslint-disable-next-line no-var
   var __albarkaMongoClients: Map<string, Promise<MongoClient>> | undefined;
+  // eslint-disable-next-line no-var
+  var __albarkaMongoIndexesEnsured: Set<string> | undefined;
+}
+
+async function ensureMongoIndexes(
+  db: ReturnType<MongoClient["db"]>,
+  dbName: string
+): Promise<void> {
+  if (!globalThis.__albarkaMongoIndexesEnsured) {
+    globalThis.__albarkaMongoIndexesEnsured = new Set<string>();
+  }
+  if (globalThis.__albarkaMongoIndexesEnsured.has(dbName)) return;
+  globalThis.__albarkaMongoIndexesEnsured.add(dbName);
+
+  await Promise.allSettled([
+    db.collection(MONGODB_COLLECTIONS.USERS).createIndex({ username: 1 }),
+    db.collection(MONGODB_COLLECTIONS.USERS).createIndex({ email: 1 }),
+    db.collection(MONGODB_COLLECTIONS.PRODUCTS).createIndex({ code: 1, isArchived: 1 }),
+    db.collection(MONGODB_COLLECTIONS.ORDERS).createIndex({ createdAt: -1 }),
+    db.collection(MONGODB_COLLECTIONS.INVOICES).createIndex({ status: 1, dueDate: 1 }),
+    db.collection(MONGODB_COLLECTIONS.LEDGER).createIndex({ partyId: 1, createdAt: -1 }),
+  ]);
 }
 
 function getClientCache(): Map<string, Promise<MongoClient>> {
@@ -219,7 +243,8 @@ async function replaceCollectionDocs<T extends { id?: string }>(
 export async function syncSnapshotToMongoIfAvailable(
   uri: string,
   requestedDbName: string,
-  snapshot: DatabaseSchema
+  snapshot: DatabaseSchema,
+  sections?: MongoSyncSection[]
 ): Promise<boolean> {
   if (!uri || !uri.startsWith("mongodb") || hasUnreplacedPasswordPlaceholder(uri)) {
     return false;
@@ -230,6 +255,7 @@ export async function syncSnapshotToMongoIfAvailable(
     const dbName = resolveIsolatedDbName(requestedDbName);
     const client = await getMongoClient(uri);
     const db = client.db(dbName);
+    await ensureMongoIndexes(db, dbName);
 
     // Strip any raw URI credentials before persisting snapshot metadata
     const sanitizedSnapshot: DatabaseSchema = {
@@ -241,59 +267,112 @@ export async function syncSnapshotToMongoIfAvailable(
       },
     };
 
-    await db.collection<{ _id: string } & Record<string, unknown>>(
-      MONGODB_COLLECTIONS.SETTINGS
-    ).updateOne(
-      { _id: "albarka_master_snapshot" },
-      {
-        $set: {
-          ...sanitizedSnapshot,
-          updatedAt: new Date().toISOString(),
-        },
-      },
-      { upsert: true }
-    );
+    const syncSet = sections ? new Set<MongoSyncSection>(sections) : null;
+    const shouldSync = (section: MongoSyncSection) =>
+      !syncSet || syncSet.has(section);
 
-    await Promise.all([
-      replaceCollectionDocs(db, MONGODB_COLLECTIONS.USERS, snapshot.users),
-      replaceCollectionDocs(db, MONGODB_COLLECTIONS.PRODUCTS, snapshot.products),
-      replaceCollectionDocs(db, MONGODB_COLLECTIONS.ORDERS, snapshot.orders),
-      replaceCollectionDocs(
-        db,
-        MONGODB_COLLECTIONS.INVOICES,
-        snapshot.erpInvoices || []
-      ),
-      replaceCollectionDocs(db, MONGODB_COLLECTIONS.PARTIES, snapshot.parties),
-      replaceCollectionDocs(db, MONGODB_COLLECTIONS.LEDGER, snapshot.ledger),
-      replaceCollectionDocs(
-        db,
-        MONGODB_COLLECTIONS.AUDIT_LOGS,
-        snapshot.sessionAuditLogs
-      ),
-      replaceCollectionDocs(
-        db,
-        MONGODB_COLLECTIONS.IMMUTABLE_AUDIT_LOGS,
-        snapshot.immutableAuditLogs
-      ),
-      replaceCollectionDocs(
-        db,
-        MONGODB_COLLECTIONS.CASHIER_SHIFTS,
-        snapshot.cashierShifts
-      ),
-      db.collection<{ _id: string } & Record<string, unknown>>(
-        MONGODB_COLLECTIONS.SESSIONS
-      ).updateOne(
-        { _id: "single_active_session" },
-        {
-          $set: {
-            activeSession: snapshot.activeSession,
-            updatedAt: new Date().toISOString(),
+    const ops: Array<Promise<unknown>> = [
+      db
+        .collection<{ _id: string } & Record<string, unknown>>(
+          MONGODB_COLLECTIONS.SETTINGS
+        )
+        .updateOne(
+          { _id: "albarka_master_snapshot" },
+          {
+            $set: {
+              ...sanitizedSnapshot,
+              updatedAt: new Date().toISOString(),
+            },
           },
-        },
-        { upsert: true }
-      ),
-    ]);
+          { upsert: true }
+        ),
+    ];
 
+    if (shouldSync("USERS")) {
+      ops.push(
+        replaceCollectionDocs(db, MONGODB_COLLECTIONS.USERS, snapshot.users)
+      );
+    }
+    if (shouldSync("PRODUCTS")) {
+      ops.push(
+        replaceCollectionDocs(
+          db,
+          MONGODB_COLLECTIONS.PRODUCTS,
+          snapshot.products
+        )
+      );
+    }
+    if (shouldSync("ORDERS")) {
+      ops.push(
+        replaceCollectionDocs(db, MONGODB_COLLECTIONS.ORDERS, snapshot.orders)
+      );
+    }
+    if (shouldSync("INVOICES")) {
+      ops.push(
+        replaceCollectionDocs(
+          db,
+          MONGODB_COLLECTIONS.INVOICES,
+          snapshot.erpInvoices || []
+        )
+      );
+    }
+    if (shouldSync("PARTIES")) {
+      ops.push(
+        replaceCollectionDocs(db, MONGODB_COLLECTIONS.PARTIES, snapshot.parties)
+      );
+    }
+    if (shouldSync("LEDGER")) {
+      ops.push(
+        replaceCollectionDocs(db, MONGODB_COLLECTIONS.LEDGER, snapshot.ledger)
+      );
+    }
+    if (shouldSync("AUDIT_LOGS")) {
+      ops.push(
+        replaceCollectionDocs(
+          db,
+          MONGODB_COLLECTIONS.AUDIT_LOGS,
+          snapshot.sessionAuditLogs
+        )
+      );
+    }
+    if (shouldSync("IMMUTABLE_AUDIT_LOGS")) {
+      ops.push(
+        replaceCollectionDocs(
+          db,
+          MONGODB_COLLECTIONS.IMMUTABLE_AUDIT_LOGS,
+          snapshot.immutableAuditLogs
+        )
+      );
+    }
+    if (shouldSync("CASHIER_SHIFTS")) {
+      ops.push(
+        replaceCollectionDocs(
+          db,
+          MONGODB_COLLECTIONS.CASHIER_SHIFTS,
+          snapshot.cashierShifts
+        )
+      );
+    }
+    if (shouldSync("SESSIONS")) {
+      ops.push(
+        db
+          .collection<{ _id: string } & Record<string, unknown>>(
+            MONGODB_COLLECTIONS.SESSIONS
+          )
+          .updateOne(
+            { _id: "single_active_session" },
+            {
+              $set: {
+                activeSession: snapshot.activeSession,
+                updatedAt: new Date().toISOString(),
+              },
+            },
+            { upsert: true }
+          )
+      );
+    }
+
+    await Promise.all(ops);
     return true;
   } catch {
     return false;

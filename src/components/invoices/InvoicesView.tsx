@@ -28,7 +28,6 @@ import {
 import {
   ERPInvoice,
   ERPInvoiceLineItem,
-  INITIAL_ERP_INVOICES,
   InvoiceStatus,
 } from "@/lib/mock/erp-data";
 import {
@@ -59,7 +58,7 @@ export default function InvoicesView({
 }: InvoicesViewProps) {
   const [viewMode, setViewMode] = useState<"LIST" | "NEW">(initialMode);
   const [internalInvoices, setInternalInvoices] =
-    useState<ERPInvoice[]>(INITIAL_ERP_INVOICES);
+    useState<ERPInvoice[]>([]);
   const invoices = controlledInvoices ?? internalInvoices;
   const setInvoices = onInvoicesChange ?? setInternalInvoices;
 

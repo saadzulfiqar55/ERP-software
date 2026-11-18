@@ -1,4 +1,5 @@
 import { DatabaseSchema, readDbAsync, writeDbAsync } from "@/lib/db";
+import type { MongoSyncSection } from "@/lib/mongodb";
 
 /**
  * Atomic Multi-Document ACID Transaction Wrapper (`withTransaction`)
@@ -7,7 +8,8 @@ import { DatabaseSchema, readDbAsync, writeDbAsync } from "@/lib/db";
  *   all changes are rolled back atomically and nothing is written to disk or MongoDB.
  */
 export async function withTransaction<T>(
-  work: (txDb: DatabaseSchema) => Promise<T> | T
+  work: (txDb: DatabaseSchema) => Promise<T> | T,
+  sections?: MongoSyncSection[]
 ): Promise<{ result: T; db: DatabaseSchema }> {
   const currentDb = await readDbAsync();
   // Deep clone snapshot for ACID rollback safety
@@ -16,7 +18,7 @@ export async function withTransaction<T>(
   const result = await work(txSnapshot);
 
   // Commit transaction atomically to MongoDB Atlas (+ local JSON cache when writable)
-  await writeDbAsync(txSnapshot);
+  await writeDbAsync(txSnapshot, sections);
 
   return { result, db: txSnapshot };
 }

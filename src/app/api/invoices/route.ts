@@ -89,7 +89,7 @@ export async function POST(request: Request) {
       }
 
       return true;
-    });
+    }, ["INVOICES", "IMMUTABLE_AUDIT_LOGS"]);
 
     return NextResponse.json({
       erpInvoices: db.erpInvoices || [],

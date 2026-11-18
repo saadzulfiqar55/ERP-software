@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   BarChart3,
   Barcode,
@@ -56,14 +57,6 @@ import {
   UserProfile,
   UserRole,
 } from "@/lib/types";
-import {
-  INITIAL_LEDGER,
-  INITIAL_ORDERS,
-  INITIAL_PARTIES,
-  INITIAL_PRA_CONFIG,
-  INITIAL_PRODUCTS,
-  INITIAL_USERS,
-} from "@/lib/seed-data";
 import { calculateSalesTax } from "@/lib/tax-calculator";
 import {
   ERP_BRAND_CONFIG,
@@ -90,13 +83,46 @@ import {
   ThemeSelector,
   ThemeToggle,
 } from "@/components/ui/m3";
-import DashboardView from "@/components/dashboard/DashboardView";
-import InvoicesView from "@/components/invoices/InvoicesView";
-import { ERPInvoice, INITIAL_ERP_INVOICES } from "@/lib/mock/erp-data";
-import CommandPalette from "@/components/shell/CommandPalette";
-import ReceiptModal from "@/components/ReceiptModal";
+import type {
+  ERPInvoice,
+  StockLevelMonitorItem,
+  WaitingTaskItem,
+} from "@/lib/mock/erp-data";
 import DishVisual from "@/components/DishVisual";
-import AuthScreen from "@/components/AuthScreen";
+
+const DashboardView = dynamic(
+  () => import("@/components/dashboard/DashboardView"),
+  { ssr: false }
+);
+const InvoicesView = dynamic(
+  () => import("@/components/invoices/InvoicesView"),
+  { ssr: false }
+);
+const CommandPalette = dynamic(
+  () => import("@/components/shell/CommandPalette"),
+  { ssr: false }
+);
+const ReceiptModal = dynamic(() => import("@/components/ReceiptModal"), {
+  ssr: false,
+});
+const AuthScreen = dynamic(() => import("@/components/AuthScreen"), {
+  ssr: false,
+});
+
+const EMPTY_PRA_CONFIG: PRAConfig = {
+  restaurantName: "ALBARKA RESTAURANT & BAKERS",
+  branchName: "",
+  ntn: "",
+  strn: "",
+  posId: "",
+  imsEndpointUrl: "",
+  apiToken: "",
+  cashTaxRate: 16,
+  cardTaxRate: 5,
+  retailTaxRate: 18,
+  serviceChargePercent: 5,
+  praLiveMode: false,
+};
 
 const RESTAURANT_TABLES = [
   "Main Hall - T1",
@@ -137,8 +163,8 @@ export function AlbarkaMaterial3ERP({
   defaultNav?: ERPNavKey;
   defaultInvoiceMode?: "LIST" | "NEW";
 }) {
-  // Authentication & Single-Session State
-  const [users, setUsers] = useState<UserProfile[]>(INITIAL_USERS);
+  // Authentication & Single-Session State (loaded strictly from /api/state)
+  const [users, setUsers] = useState<UserProfile[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [sessionAuditLogs, setSessionAuditLogs] = useState<SessionAuditLog[]>([]);
@@ -165,20 +191,21 @@ export function AlbarkaMaterial3ERP({
     | "APPEARANCE"
   >("PRA_INTEGRATION");
 
-  // Persistent App Data State
-  const [praConfig, setPraConfig] = useState<PRAConfig>(INITIAL_PRA_CONFIG);
+  // Persistent App Data State (hydrated from DB via /api/state)
+  const [praConfig, setPraConfig] = useState<PRAConfig>(EMPTY_PRA_CONFIG);
   const [mongoConfig, setMongoConfig] = useState<MongoDBConfig>({
     enabled: false,
-    uri: "mongodb://127.0.0.1:27017/albarka_erp",
+    uri: "",
     dbName: "albarka_erp",
-    lastStatus: "Local JSON File Store Active (data/albarka-db.json) — MongoDB Ready",
+    lastStatus: "Loading MongoDB status…",
   });
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
-  const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
-  const [erpInvoices, setErpInvoices] =
-    useState<ERPInvoice[]>(INITIAL_ERP_INVOICES);
-  const [parties, setParties] = useState<PartyAccount[]>(INITIAL_PARTIES);
-  const [ledger, setLedger] = useState<LedgerEntry[]>(INITIAL_LEDGER);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [erpInvoices, setErpInvoices] = useState<ERPInvoice[]>([]);
+  const [parties, setParties] = useState<PartyAccount[]>([]);
+  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+  const [waitingTasks, setWaitingTasks] = useState<WaitingTaskItem[]>([]);
+  const [stockMonitor, setStockMonitor] = useState<StockLevelMonitorItem[]>([]);
   const [immutableAuditLogs, setImmutableAuditLogs] = useState<
     ImmutableAuditLog[]
   >([]);
@@ -201,9 +228,7 @@ export function AlbarkaMaterial3ERP({
   const [customerName, setCustomerName] = useState<string>("");
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [buyerNtnCnic] = useState<string>("");
-  const [selectedKhataId, setSelectedKhataId] = useState<string>(
-    INITIAL_PARTIES[0].id
-  );
+  const [selectedKhataId, setSelectedKhataId] = useState<string>("");
   const [cart, setCart] = useState<CartItem[]>([
     {
       cartItemId: "init-1",
@@ -272,9 +297,7 @@ export function AlbarkaMaterial3ERP({
   const [ledgerPartyFilter, setLedgerPartyFilter] = useState<"ALL" | PartyType>(
     "ALL"
   );
-  const [selectedPartyId, setSelectedPartyId] = useState<string>(
-    INITIAL_PARTIES[0].id
-  );
+  const [selectedPartyId, setSelectedPartyId] = useState<string>("");
   const [voucherType, setVoucherType] = useState<
     | "CUSTOMER_RECEIPT"
     | "SUPPLIER_BILL"
@@ -343,14 +366,20 @@ export function AlbarkaMaterial3ERP({
     const stateRes = await fetch("/api/state");
     if (!stateRes.ok) return;
     const data = await stateRes.json();
-    setPraConfig(data.praConfig);
+    if (data.praConfig) setPraConfig(data.praConfig);
     if (data.mongoConfig) setMongoConfig(data.mongoConfig);
-    setProducts(data.products);
-    setOrders(data.orders);
+    setProducts(data.products || []);
+    setOrders(data.orders || []);
     if (data.erpInvoices) setErpInvoices(data.erpInvoices);
-    setParties(data.parties);
+    setParties(data.parties || []);
+    if (data.parties?.[0]?.id) {
+      setSelectedKhataId((prev) => prev || data.parties[0].id);
+      setSelectedPartyId((prev) => prev || data.parties[0].id);
+    }
     setLedger(data.ledger || []);
     if (data.users) setUsers(data.users);
+    if (data.waitingTasks) setWaitingTasks(data.waitingTasks);
+    if (data.stockMonitor) setStockMonitor(data.stockMonitor);
     setImmutableAuditLogs(data.immutableAuditLogs || []);
     if (data.cashierShifts) setCashierShifts(data.cashierShifts);
     if (data.fiscalPeriods) setFiscalPeriods(data.fiscalPeriods);
@@ -386,6 +415,40 @@ export function AlbarkaMaterial3ERP({
     setTimeout(() => setSnackbarMessage(""), 4500);
   }
 
+  async function handleApproveTask(task: WaitingTaskItem) {
+    const res = await fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approveTaskId: task.id }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      notifySaved(data.error || "Permission denied for task approval.");
+      return;
+    }
+    if (data.waitingTasks) setWaitingTasks(data.waitingTasks);
+    if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
+    notifySaved(`Approved ${task.referenceCode} (${task.title})`);
+  }
+
+  async function handleReorderStock(item: StockLevelMonitorItem) {
+    const res = await fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reorderStockId: item.id }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      notifySaved(data.error || "Permission denied for stock reorder.");
+      return;
+    }
+    if (data.stockMonitor) setStockMonitor(data.stockMonitor);
+    if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
+    notifySaved(
+      `Restocked ${item.name} to ${item.reorderTarget} ${item.unit}`
+    );
+  }
+
   async function handleLogoutSession() {
     const res = await fetch("/api/auth", {
       method: "POST",
@@ -398,8 +461,11 @@ export function AlbarkaMaterial3ERP({
       setActiveSession(null);
       setCurrentUser(null);
       setLedger([]);
+      setParties([]);
+      setWaitingTasks([]);
       setImmutableAuditLogs([]);
       setActiveNav("dashboard");
+      void fetchScopedState();
     }
   }
 
@@ -486,6 +552,51 @@ export function AlbarkaMaterial3ERP({
     includeServiceCharge,
     splitCashRatio,
   ]);
+
+  const canViewLedger = currentUser
+    ? hasGranularPermission(currentUser.role, "accounting:ledger:view")
+    : false;
+
+  const totalSalesRevenue = useMemo(
+    () => orders.reduce((s, o) => s + o.taxBreakdown.grandTotal, 0),
+    [orders]
+  );
+  const totalPraTaxCollected = useMemo(
+    () => orders.reduce((s, o) => s + o.taxBreakdown.totalSalesTax, 0),
+    [orders]
+  );
+  const totalReceivables = useMemo(
+    () =>
+      parties
+        .filter((p) => p.type === "CUSTOMER" && p.currentBalance > 0)
+        .reduce((s, p) => s + p.currentBalance, 0),
+    [parties]
+  );
+  const totalPayables = useMemo(
+    () =>
+      parties
+        .filter((p) => p.type === "SUPPLIER" && p.currentBalance < 0)
+        .reduce((s, p) => s + Math.abs(p.currentBalance), 0),
+    [parties]
+  );
+  const supplierCount = useMemo(
+    () => parties.filter((p) => p.type === "SUPPLIER").length,
+    [parties]
+  );
+  const pendingTasksCount = useMemo(
+    () =>
+      waitingTasks.filter((t) => {
+        if (t.status !== "PENDING") return false;
+        if (
+          !canViewLedger &&
+          (t.type === "OVERDUE_ALERT" || t.type === "PERIOD_CLOSE")
+        ) {
+          return false;
+        }
+        return true;
+      }).length,
+    [waitingTasks, canViewLedger]
+  );
 
   const cashComparison = useMemo(
     () =>
@@ -1259,10 +1370,6 @@ export function AlbarkaMaterial3ERP({
   }
 
   const isSuperAdmin = currentUser.role === "ADMIN";
-  const canViewLedger = hasGranularPermission(
-    currentUser.role,
-    "accounting:ledger:view"
-  );
   const canManageInventory = hasGranularPermission(
     currentUser.role,
     "inventory:adjust"
@@ -1320,23 +1427,6 @@ export function AlbarkaMaterial3ERP({
         return <Settings {...props} />;
     }
   };
-
-  const totalSalesRevenue = orders.reduce(
-    (s, o) => s + o.taxBreakdown.grandTotal,
-    0
-  );
-  const totalPraTaxCollected = orders.reduce(
-    (s, o) => s + o.taxBreakdown.totalSalesTax,
-    0
-  );
-  const totalReceivables = parties
-    .filter((p) => p.type === "CUSTOMER" && p.currentBalance > 0)
-    .reduce((s, p) => s + p.currentBalance, 0);
-  const totalPayables = parties
-    .filter((p) => p.type === "SUPPLIER" && p.currentBalance < 0)
-    .reduce((s, p) => s + Math.abs(p.currentBalance), 0);
-
-  const supplierCount = parties.filter((p) => p.type === "SUPPLIER").length;
 
   const getNavBadgeCount = (key: ERPNavKey): number | undefined => {
     switch (key) {
@@ -1625,9 +1715,11 @@ export function AlbarkaMaterial3ERP({
               >
                 <Bell className="w-5 h-5" strokeWidth={1.8} />
               </Button>
-              <span className="absolute top-2 right-2 w-4 h-4 rounded-full bg-md-error text-md-on-primary text-[10px] font-medium flex items-center justify-center pointer-events-none">
-                5
-              </span>
+              {pendingTasksCount > 0 && (
+                <span className="absolute top-2 right-2 w-4 h-4 rounded-full bg-md-error text-md-on-primary text-[10px] font-medium flex items-center justify-center pointer-events-none">
+                  {pendingTasksCount}
+                </span>
+              )}
             </div>
 
             <button
@@ -1697,8 +1789,15 @@ export function AlbarkaMaterial3ERP({
           {activeNav === "dashboard" && (
             <DashboardView
               orders={orders}
+              erpInvoices={erpInvoices}
+              parties={parties}
+              tasks={waitingTasks}
+              stockItems={stockMonitor}
+              canViewLedger={canViewLedger}
+              canAdjustStock={canManageInventory}
+              onApproveTask={handleApproveTask}
+              onReorderStock={handleReorderStock}
               onNavigate={(target) => setActiveNav(target as ERPNavKey)}
-              onShowSnackbar={notifySaved}
               onSelectOrderReceipt={(ord) => setActiveReceiptOrder(ord)}
             />
           )}

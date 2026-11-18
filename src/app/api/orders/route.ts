@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       storeIdempotencyRecord(txDb, idempotencyKey, "POS_ORDER_CREATE", 200, saleResult);
 
       return saleResult;
-    });
+    }, ["ORDERS", "PRODUCTS", "PARTIES", "LEDGER", "CASHIER_SHIFTS", "IMMUTABLE_AUDIT_LOGS"]);
 
     return NextResponse.json({
       order: result.order,

@@ -39,16 +39,6 @@ export default function RootLayout({
             __html: `(function(){try{var k="albarka-theme";var p=localStorage.getItem(k)||"light";var t=p==="system"?(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):(p==="dark"?"dark":"light");document.documentElement.setAttribute("data-theme",t);}catch(e){}})();`,
           }}
         />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&family=Roboto:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
       </head>
       <body className="min-h-screen bg-md-surface text-md-on-surface font-sans antialiased selection:bg-md-primary selection:text-md-on-primary">
         {children}

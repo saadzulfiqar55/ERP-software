@@ -211,7 +211,7 @@ export async function POST(request: Request) {
       const resPayload = { entry };
       storeIdempotencyRecord(txDb, idempotencyKey, "LEDGER_MUTATION", 200, resPayload);
       return resPayload;
-    });
+    }, ["PARTIES", "LEDGER", "IMMUTABLE_AUDIT_LOGS"]);
 
     return NextResponse.json({
       ...((result as object) || {}),

@@ -13,10 +13,18 @@ import {
   hasUnreplacedPasswordPlaceholder,
   loadSnapshotFromMongo,
   maskMongoUri,
+  MongoSyncSection,
   resolveIsolatedDbName,
   syncSnapshotToMongoIfAvailable,
 } from "./mongodb";
-import { ERPInvoice, INITIAL_ERP_INVOICES } from "./mock/erp-data";
+import {
+  ERPInvoice,
+  INITIAL_ERP_INVOICES,
+  INITIAL_STOCK_MONITOR,
+  INITIAL_WAITING_TASKS,
+  StockLevelMonitorItem,
+  WaitingTaskItem,
+} from "./mock/erp-data";
 import {
   ActiveSession,
   CashierShift,
@@ -50,6 +58,8 @@ export interface DatabaseSchema {
   documentCounters: DocumentCounter[];
   cashierShifts: CashierShift[];
   fiscalPeriods: FiscalPeriod[];
+  waitingTasks?: WaitingTaskItem[];
+  stockMonitor?: StockLevelMonitorItem[];
 }
 
 const IS_SERVERLESS = Boolean(
@@ -185,6 +195,8 @@ function buildDefaults(): DatabaseSchema {
     ],
     cashierShifts: [DEFAULT_CASHIER_SHIFT],
     fiscalPeriods: DEFAULT_FISCAL_PERIODS,
+    waitingTasks: INITIAL_WAITING_TASKS,
+    stockMonitor: INITIAL_STOCK_MONITOR,
   };
 }
 
@@ -258,6 +270,14 @@ function mergeWithDefaults(
       parsed.fiscalPeriods && parsed.fiscalPeriods.length > 0
         ? parsed.fiscalPeriods
         : defaults.fiscalPeriods,
+    waitingTasks:
+      parsed.waitingTasks && parsed.waitingTasks.length > 0
+        ? parsed.waitingTasks
+        : defaults.waitingTasks,
+    stockMonitor:
+      parsed.stockMonitor && parsed.stockMonitor.length > 0
+        ? parsed.stockMonitor
+        : defaults.stockMonitor,
   };
 }
 
@@ -324,13 +344,17 @@ export async function readDbAsync(): Promise<DatabaseSchema> {
 /**
  * Persists state to MongoDB Atlas (authoritative in production/Vercel) and best-effort JSON cache.
  */
-export async function writeDbAsync(data: DatabaseSchema): Promise<void> {
+export async function writeDbAsync(
+  data: DatabaseSchema,
+  sections?: MongoSyncSection[]
+): Promise<void> {
   writeDb(data);
   if (data.mongoConfig?.enabled && data.mongoConfig?.uri) {
     await syncSnapshotToMongoIfAvailable(
       data.mongoConfig.uri,
       data.mongoConfig.dbName,
-      data
+      data,
+      sections
     );
   }
 }

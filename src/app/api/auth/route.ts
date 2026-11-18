@@ -10,6 +10,42 @@ export const dynamic = "force-dynamic";
 
 const COOKIE_NAME = "albarka_session_jwt";
 
+// Sliding-window brute-force protection for failed login attempts
+const MAX_FAILED_ATTEMPTS = 8;
+const WINDOW_MS = 5 * 60 * 1000;
+const failedLoginStore = new Map<string, { count: number; resetAt: number }>();
+
+function getClientKey(request: Request, identifier: string): string {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  const ip = forwarded || realIp || "local";
+  return `${ip}:${identifier || "unknown"}`;
+}
+
+function isRateLimited(key: string): boolean {
+  const entry = failedLoginStore.get(key);
+  if (!entry) return false;
+  if (Date.now() > entry.resetAt) {
+    failedLoginStore.delete(key);
+    return false;
+  }
+  return entry.count >= MAX_FAILED_ATTEMPTS;
+}
+
+function recordFailedAttempt(key: string): void {
+  const now = Date.now();
+  const existing = failedLoginStore.get(key);
+  if (!existing || now > existing.resetAt) {
+    failedLoginStore.set(key, { count: 1, resetAt: now + WINDOW_MS });
+  } else {
+    existing.count += 1;
+  }
+}
+
+function clearFailedAttempts(key: string): void {
+  failedLoginStore.delete(key);
+}
+
 export async function GET() {
   const db = await readDbAsync();
   const cookieStore = await cookies();
@@ -18,7 +54,7 @@ export async function GET() {
   // Auto-expire stale server session if past expiresAt
   if (db.activeSession && new Date(db.activeSession.expiresAt).getTime() < Date.now()) {
     db.activeSession = null;
-    await writeDbAsync(db);
+    await writeDbAsync(db, ["SESSIONS"]);
   }
 
   if (!token) {
@@ -75,7 +111,7 @@ export async function POST(request: Request) {
         };
         db.sessionAuditLogs = [logEntry, ...db.sessionAuditLogs.slice(0, 29)];
         db.activeSession = null;
-        await writeDbAsync(db);
+        await writeDbAsync(db, ["SESSIONS", "AUDIT_LOGS"]);
       }
       cookieStore.delete(COOKIE_NAME);
       return NextResponse.json({
@@ -129,7 +165,7 @@ export async function POST(request: Request) {
 
       db.activeSession = updatedSession;
       db.sessionAuditLogs = [logEntry, ...db.sessionAuditLogs.slice(0, 29)];
-      await writeDbAsync(db);
+      await writeDbAsync(db, ["SESSIONS", "AUDIT_LOGS"]);
 
       cookieStore.set(COOKIE_NAME, token, {
         httpOnly: true,
@@ -148,9 +184,20 @@ export async function POST(request: Request) {
       });
     }
 
-    // 3. LOGIN (USERNAME + PASSWORD FOR ADMIN, PIN FOR STAFF DEMO) WITH SINGLE-SESSION LOCK ENFORCEMENT
+    // 3. LOGIN (USERNAME + PASSWORD FOR ADMIN, PIN FOR STAFF DEMO) WITH RATE LIMITING
     const identifier =
       typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
+    const rateKey = getClientKey(
+      request,
+      identifier || String(body.userId || "")
+    );
+    if (isRateLimited(rateKey)) {
+      return NextResponse.json(
+        { error: "Too many failed sign-in attempts. Please wait 5 minutes and try again." },
+        { status: 429 }
+      );
+    }
+
     const envAdminUsername = process.env.ADMIN_USERNAME?.trim().toLowerCase();
 
     let targetUser = body.userId
@@ -169,6 +216,7 @@ export async function POST(request: Request) {
     }
 
     if (!targetUser) {
+      recordFailedAttempt(rateKey);
       return NextResponse.json(
         { error: "Invalid username or credentials." },
         { status: 401 }
@@ -201,6 +249,7 @@ export async function POST(request: Request) {
       );
 
       if (!envOverrideMatches && !hashMatches) {
+        recordFailedAttempt(rateKey);
         return NextResponse.json(
           { error: "Invalid Super Admin username or password." },
           { status: 401 }
@@ -213,6 +262,7 @@ export async function POST(request: Request) {
         !providedPin ||
         !timingSafeEqualStrings(providedPin, targetUser.pin)
       ) {
+        recordFailedAttempt(rateKey);
         return NextResponse.json(
           { error: `Invalid 4-digit PIN for ${targetUser.name}.` },
           { status: 401 }
@@ -220,6 +270,7 @@ export async function POST(request: Request) {
       }
     }
 
+    clearFailedAttempts(rateKey);
     const authMethod: "JWT_PIN" | "OAUTH_SSO" = "JWT_PIN";
 
     // STRICT SINGLE-PROFILE LOCK CHECK:
@@ -239,7 +290,7 @@ export async function POST(request: Request) {
         details: `Blocked concurrent login: ${db.activeSession.userName} (${db.activeSession.userRole}) is already logged in.`,
       };
       db.sessionAuditLogs = [conflictLog, ...db.sessionAuditLogs.slice(0, 29)];
-      await writeDbAsync(db);
+      await writeDbAsync(db, ["AUDIT_LOGS"]);
 
       return NextResponse.json(
         {
@@ -297,7 +348,7 @@ export async function POST(request: Request) {
 
     db.activeSession = newSession;
     db.sessionAuditLogs = [auditEntry, ...db.sessionAuditLogs.slice(0, 29)];
-    await writeDbAsync(db);
+    await writeDbAsync(db, ["SESSIONS", "AUDIT_LOGS"]);
 
     cookieStore.set(COOKIE_NAME, token, {
       httpOnly: true,
