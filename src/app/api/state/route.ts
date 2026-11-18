@@ -8,11 +8,13 @@ import {
 import { withTransaction } from "@/core/db";
 import { toMinorUnits } from "@/core/money";
 import { sanitizeNoSqlPayload } from "@/core/validation";
-import { DatabaseSchema, getPublicMongoConfig, readDb } from "@/lib/db";
+import { DatabaseSchema, getPublicMongoConfig, readDbAsync } from "@/lib/db";
 import { isMaskedMongoUri, pingMongoConnection } from "@/lib/mongodb";
 import { MongoDBConfig, PRAConfig, Product, UserProfile } from "@/lib/types";
 import { AccountingService } from "@/modules/accounting/accounting.service";
 import { InventoryService } from "@/modules/inventory/inventory.service";
+
+export const dynamic = "force-dynamic";
 
 function buildScopedStateResponse(
   db: DatabaseSchema,
@@ -58,7 +60,7 @@ function buildScopedStateResponse(
 }
 
 export async function GET() {
-  const db = readDb();
+  const db = await readDbAsync();
   const actor = await tryResolveOptionalActor(db);
   return NextResponse.json(buildScopedStateResponse(db, actor));
 }

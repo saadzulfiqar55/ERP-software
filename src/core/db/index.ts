@@ -1,11 +1,4 @@
-import { DatabaseSchema, readDb, writeDb } from "@/lib/db";
-import { syncSnapshotToMongoIfAvailable } from "@/lib/mongodb";
-
-declare global {
-  // Global singleton cache for MongoDB Client so Next.js hot reloads don't exhaust connections
-  // eslint-disable-next-line no-var
-  var __albarkaMongoClientPromise: Promise<unknown> | undefined;
-}
+import { DatabaseSchema, readDbAsync, writeDbAsync } from "@/lib/db";
 
 /**
  * Atomic Multi-Document ACID Transaction Wrapper (`withTransaction`)
@@ -16,22 +9,14 @@ declare global {
 export async function withTransaction<T>(
   work: (txDb: DatabaseSchema) => Promise<T> | T
 ): Promise<{ result: T; db: DatabaseSchema }> {
-  const currentDb = readDb();
+  const currentDb = await readDbAsync();
   // Deep clone snapshot for ACID rollback safety
   const txSnapshot: DatabaseSchema = JSON.parse(JSON.stringify(currentDb));
 
   const result = await work(txSnapshot);
 
-  // Commit transaction atomically
-  writeDb(txSnapshot);
-
-  if (txSnapshot.mongoConfig?.uri && txSnapshot.mongoConfig.enabled) {
-    await syncSnapshotToMongoIfAvailable(
-      txSnapshot.mongoConfig.uri,
-      txSnapshot.mongoConfig.dbName,
-      txSnapshot
-    );
-  }
+  // Commit transaction atomically to MongoDB Atlas (+ local JSON cache when writable)
+  await writeDbAsync(txSnapshot);
 
   return { result, db: txSnapshot };
 }

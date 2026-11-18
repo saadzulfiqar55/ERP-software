@@ -297,3 +297,32 @@ export async function syncSnapshotToMongoIfAvailable(
     return false;
   }
 }
+
+export async function loadSnapshotFromMongo(
+  uri: string,
+  requestedDbName?: string
+): Promise<Partial<DatabaseSchema> | null> {
+  if (!uri || !uri.startsWith("mongodb") || hasUnreplacedPasswordPlaceholder(uri)) {
+    return null;
+  }
+
+  try {
+    assertSafeMongoUri(uri);
+    const dbName = resolveIsolatedDbName(requestedDbName);
+    const client = await getMongoClient(uri);
+    const db = client.db(dbName);
+    const doc = await db
+      .collection<{ _id: string } & Partial<DatabaseSchema> & { updatedAt?: string }>(
+        MONGODB_COLLECTIONS.SETTINGS
+      )
+      .findOne({ _id: "albarka_master_snapshot" });
+
+    if (!doc) return null;
+    const { _id: _omitId, updatedAt: _omitUpdatedAt, ...snapshot } = doc;
+    void _omitId;
+    void _omitUpdatedAt;
+    return snapshot;
+  } catch {
+    return null;
+  }
+}

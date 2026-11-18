@@ -11,8 +11,10 @@ import {
 import {
   DEFAULT_ISOLATED_DB_NAME,
   hasUnreplacedPasswordPlaceholder,
+  loadSnapshotFromMongo,
   maskMongoUri,
   resolveIsolatedDbName,
+  syncSnapshotToMongoIfAvailable,
 } from "./mongodb";
 import { ERPInvoice, INITIAL_ERP_INVOICES } from "./mock/erp-data";
 import {
@@ -50,7 +52,12 @@ export interface DatabaseSchema {
   fiscalPeriods: FiscalPeriod[];
 }
 
-const DB_DIR = path.join(process.cwd(), "data");
+const IS_SERVERLESS = Boolean(
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY
+);
+const DB_DIR = IS_SERVERLESS
+  ? path.join("/tmp", "albarka-data")
+  : path.join(process.cwd(), "data");
 const DB_FILE = path.join(DB_DIR, "albarka-db.json");
 const ENV_LOCAL_FILE = path.join(process.cwd(), ".env.local");
 
@@ -138,8 +145,8 @@ const DEFAULT_FISCAL_PERIODS: FiscalPeriod[] = [
   },
 ];
 
-export function readDb(): DatabaseSchema {
-  const defaults: DatabaseSchema = {
+function buildDefaults(): DatabaseSchema {
+  return {
     praConfig: INITIAL_PRA_CONFIG,
     mongoConfig: DEFAULT_MONGO_CONFIG,
     products: INITIAL_PRODUCTS,
@@ -175,6 +182,39 @@ export function readDb(): DatabaseSchema {
     cashierShifts: [DEFAULT_CASHIER_SHIFT],
     fiscalPeriods: DEFAULT_FISCAL_PERIODS,
   };
+}
+
+function mergeWithDefaults(
+  parsed: Partial<DatabaseSchema>,
+  envMongo: MongoDBConfig | null
+): DatabaseSchema {
+  const defaults = buildDefaults();
+  return {
+    ...defaults,
+    ...parsed,
+    users: parsed.users && parsed.users.length > 0 ? parsed.users : INITIAL_USERS,
+    erpInvoices:
+      parsed.erpInvoices && parsed.erpInvoices.length > 0
+        ? parsed.erpInvoices
+        : INITIAL_ERP_INVOICES,
+    mongoConfig: envMongo || parsed.mongoConfig || DEFAULT_MONGO_CONFIG,
+    sessionAuditLogs: parsed.sessionAuditLogs || [],
+    immutableAuditLogs: parsed.immutableAuditLogs || defaults.immutableAuditLogs,
+    idempotencyRecords: parsed.idempotencyRecords || [],
+    documentCounters: parsed.documentCounters || defaults.documentCounters,
+    cashierShifts:
+      parsed.cashierShifts && parsed.cashierShifts.length > 0
+        ? parsed.cashierShifts
+        : defaults.cashierShifts,
+    fiscalPeriods:
+      parsed.fiscalPeriods && parsed.fiscalPeriods.length > 0
+        ? parsed.fiscalPeriods
+        : defaults.fiscalPeriods,
+  };
+}
+
+export function readDb(): DatabaseSchema {
+  const defaults = buildDefaults();
 
   try {
     if (!fs.existsSync(DB_DIR)) {
@@ -186,37 +226,63 @@ export function readDb(): DatabaseSchema {
     }
     const raw = fs.readFileSync(DB_FILE, "utf-8");
     const parsed = JSON.parse(raw) as Partial<DatabaseSchema>;
-    const envMongo = getEnvMongoConfig();
-    return {
-      ...defaults,
-      ...parsed,
-      users: parsed.users && parsed.users.length > 0 ? parsed.users : INITIAL_USERS,
-      erpInvoices:
-        parsed.erpInvoices && parsed.erpInvoices.length > 0
-          ? parsed.erpInvoices
-          : INITIAL_ERP_INVOICES,
-      mongoConfig: envMongo || parsed.mongoConfig || DEFAULT_MONGO_CONFIG,
-      sessionAuditLogs: parsed.sessionAuditLogs || [],
-      immutableAuditLogs: parsed.immutableAuditLogs || defaults.immutableAuditLogs,
-      idempotencyRecords: parsed.idempotencyRecords || [],
-      documentCounters: parsed.documentCounters || defaults.documentCounters,
-      cashierShifts:
-        parsed.cashierShifts && parsed.cashierShifts.length > 0
-          ? parsed.cashierShifts
-          : defaults.cashierShifts,
-      fiscalPeriods:
-        parsed.fiscalPeriods && parsed.fiscalPeriods.length > 0
-          ? parsed.fiscalPeriods
-          : defaults.fiscalPeriods,
-    };
+    return mergeWithDefaults(parsed, getEnvMongoConfig());
   } catch {
     return defaults;
   }
 }
 
 export function writeDb(data: DatabaseSchema): void {
-  if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true });
+    }
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+  } catch {
+    // Serverless environments with read-only filesystems rely on MongoDB Atlas persistence
   }
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+}
+
+/**
+ * MongoDB-first async state loader for serverless deployments (Vercel) and local Node.
+ * Falls back transparently to local JSON store if MongoDB is disabled or unreachable.
+ */
+export async function readDbAsync(): Promise<DatabaseSchema> {
+  const envMongo = getEnvMongoConfig();
+  const localSnapshot = readDb();
+  const activeMongo =
+    envMongo?.enabled && envMongo.uri
+      ? envMongo
+      : localSnapshot.mongoConfig?.enabled && localSnapshot.mongoConfig?.uri
+      ? localSnapshot.mongoConfig
+      : null;
+
+  if (activeMongo) {
+    const remote = await loadSnapshotFromMongo(
+      activeMongo.uri,
+      activeMongo.dbName
+    );
+    if (remote) {
+      return mergeWithDefaults(remote, {
+        ...activeMongo,
+        lastStatus: `MongoDB Atlas Connected (isolated DB: ${activeMongo.dbName})`,
+      });
+    }
+  }
+
+  return localSnapshot;
+}
+
+/**
+ * Persists state to MongoDB Atlas (authoritative in production/Vercel) and best-effort JSON cache.
+ */
+export async function writeDbAsync(data: DatabaseSchema): Promise<void> {
+  writeDb(data);
+  if (data.mongoConfig?.enabled && data.mongoConfig?.uri) {
+    await syncSnapshotToMongoIfAvailable(
+      data.mongoConfig.uri,
+      data.mongoConfig.dbName,
+      data
+    );
+  }
 }

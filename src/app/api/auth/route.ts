@@ -1,20 +1,22 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { readDb, writeDb } from "@/lib/db";
+import { readDbAsync, writeDbAsync } from "@/lib/db";
 import { signJwt, verifyJwt } from "@/lib/auth-jwt";
 import { ActiveSession, SessionAuditLog } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
 
 const COOKIE_NAME = "albarka_session_jwt";
 
 export async function GET() {
-  const db = readDb();
+  const db = await readDbAsync();
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
 
   // Auto-expire stale server session if past expiresAt
   if (db.activeSession && new Date(db.activeSession.expiresAt).getTime() < Date.now()) {
     db.activeSession = null;
-    writeDb(db);
+    await writeDbAsync(db);
   }
 
   if (!token) {
@@ -49,7 +51,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const db = readDb();
+    const db = await readDbAsync();
     const cookieStore = await cookies();
 
     // Auto-clear expired lock
@@ -71,7 +73,7 @@ export async function POST(request: Request) {
         };
         db.sessionAuditLogs = [logEntry, ...db.sessionAuditLogs.slice(0, 29)];
         db.activeSession = null;
-        writeDb(db);
+        await writeDbAsync(db);
       }
       cookieStore.delete(COOKIE_NAME);
       return NextResponse.json({
@@ -125,10 +127,11 @@ export async function POST(request: Request) {
 
       db.activeSession = updatedSession;
       db.sessionAuditLogs = [logEntry, ...db.sessionAuditLogs.slice(0, 29)];
-      writeDb(db);
+      await writeDbAsync(db);
 
       cookieStore.set(COOKIE_NAME, token, {
         httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
         path: "/",
         sameSite: "lax",
         maxAge: 12 * 60 * 60,
@@ -176,7 +179,7 @@ export async function POST(request: Request) {
         details: `Blocked concurrent login: ${db.activeSession.userName} (${db.activeSession.userRole}) is already logged in.`,
       };
       db.sessionAuditLogs = [conflictLog, ...db.sessionAuditLogs.slice(0, 29)];
-      writeDb(db);
+      await writeDbAsync(db);
 
       return NextResponse.json(
         {
@@ -234,10 +237,11 @@ export async function POST(request: Request) {
 
     db.activeSession = newSession;
     db.sessionAuditLogs = [auditEntry, ...db.sessionAuditLogs.slice(0, 29)];
-    writeDb(db);
+    await writeDbAsync(db);
 
     cookieStore.set(COOKIE_NAME, token, {
       httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
       path: "/",
       sameSite: "lax",
       maxAge: 8 * 60 * 60,
