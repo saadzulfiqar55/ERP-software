@@ -193,10 +193,34 @@ function mergeWithDefaults(
   envMongo: MongoDBConfig | null
 ): DatabaseSchema {
   const defaults = buildDefaults();
+  const seededAdmin = INITIAL_USERS.find((u) => u.id === "user-admin-1");
+
+  // Upgrade any legacy ADMIN record loaded from existing JSON / MongoDB snapshots
+  // so weak 4-digit PIN auth (`1111`) is permanently replaced with scrypt password auth.
+  const rawUsers =
+    parsed.users && parsed.users.length > 0 ? parsed.users : INITIAL_USERS;
+  const normalizedUsers = rawUsers.map((u) => {
+    if (u.role === "ADMIN") {
+      return {
+        ...u,
+        pin: "",
+        authType: "PASSWORD" as const,
+        isDemoAccount: false,
+        passwordHash: u.passwordHash || seededAdmin?.passwordHash,
+      };
+    }
+    return {
+      ...u,
+      authType: u.authType || ("PIN" as const),
+      isDemoAccount:
+        u.isDemoAccount ?? (u.id === "user-manager-1" || u.id === "user-cashier-1"),
+    };
+  });
+
   return {
     ...defaults,
     ...parsed,
-    users: parsed.users && parsed.users.length > 0 ? parsed.users : INITIAL_USERS,
+    users: normalizedUsers,
     erpInvoices:
       parsed.erpInvoices && parsed.erpInvoices.length > 0
         ? parsed.erpInvoices

@@ -317,7 +317,14 @@ export function AlbarkaMaterial3ERP({
   const [newProfileTitle, setNewProfileTitle] = useState<string>("");
   const [newProfileEmail, setNewProfileEmail] = useState<string>("");
   const [newProfilePin, setNewProfilePin] = useState<string>("");
+  const [newProfilePassword, setNewProfilePassword] = useState<string>("");
   const [savingProfile, setSavingProfile] = useState<boolean>(false);
+
+  // Super Admin Password Rotation State
+  const [currentAdminPassword, setCurrentAdminPassword] = useState<string>("");
+  const [nextAdminPassword, setNextAdminPassword] = useState<string>("");
+  const [confirmAdminPassword, setConfirmAdminPassword] = useState<string>("");
+  const [savingAdminPassword, setSavingAdminPassword] = useState<boolean>(false);
 
   // Global Ctrl+K shortcut to open Command Palette
   useEffect(() => {
@@ -1084,8 +1091,17 @@ export function AlbarkaMaterial3ERP({
 
   async function handleCreateProfile(e: React.FormEvent) {
     e.preventDefault();
-    if (!newProfileName.trim() || !newProfileEmail.trim() || !newProfilePin.trim()) {
-      notifySaved("Fill in Name, Email, and 4-digit PIN.");
+    const isCreatingAdmin = newProfileRole === "ADMIN";
+    if (!newProfileName.trim() || !newProfileEmail.trim()) {
+      notifySaved("Fill in Name and Work Email.");
+      return;
+    }
+    if (isCreatingAdmin && newProfilePassword.length < 8) {
+      notifySaved("Super Admin profiles require a password (min 8 chars).");
+      return;
+    }
+    if (!isCreatingAdmin && !/^\d{4}$/.test(newProfilePin.trim())) {
+      notifySaved("Staff PIN must be exactly 4 digits.");
       return;
     }
     setSavingProfile(true);
@@ -1099,7 +1115,8 @@ export function AlbarkaMaterial3ERP({
           role: newProfileRole,
           title: newProfileTitle.trim(),
           email: newProfileEmail.trim(),
-          pin: newProfilePin.trim(),
+          pin: isCreatingAdmin ? "" : newProfilePin.trim(),
+          password: isCreatingAdmin ? newProfilePassword : "",
         }),
       });
       const data = await res.json();
@@ -1113,9 +1130,46 @@ export function AlbarkaMaterial3ERP({
       setNewProfileTitle("");
       setNewProfileEmail("");
       setNewProfilePin("");
+      setNewProfilePassword("");
       notifySaved(`Added ${newProfileRole} profile "${data.user.name}".`);
     } finally {
       setSavingProfile(false);
+    }
+  }
+
+  async function handleChangeAdminPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!currentAdminPassword || nextAdminPassword.length < 8) {
+      notifySaved("New Super Admin password must be at least 8 characters.");
+      return;
+    }
+    if (nextAdminPassword !== confirmAdminPassword) {
+      notifySaved("New password and confirmation do not match.");
+      return;
+    }
+    setSavingAdminPassword(true);
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "CHANGE_PASSWORD",
+          currentPassword: currentAdminPassword,
+          newPassword: nextAdminPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        notifySaved(data.error || "Failed to update Super Admin password.");
+        return;
+      }
+      if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
+      setCurrentAdminPassword("");
+      setNextAdminPassword("");
+      setConfirmAdminPassword("");
+      notifySaved("Super Admin password updated securely (scrypt hash saved).");
+    } finally {
+      setSavingAdminPassword(false);
     }
   }
 
@@ -3014,14 +3068,25 @@ export function AlbarkaMaterial3ERP({
                           value={newProfileEmail}
                           onChange={setNewProfileEmail}
                         />
-                        <OutlinedTextField
-                          label="4-digit PIN"
-                          mono
-                          required
-                          placeholder="4444"
-                          value={newProfilePin}
-                          onChange={setNewProfilePin}
-                        />
+                        {newProfileRole === "ADMIN" ? (
+                          <OutlinedTextField
+                            label="Admin password (min 8)"
+                            type="password"
+                            required
+                            placeholder="Strong password"
+                            value={newProfilePassword}
+                            onChange={setNewProfilePassword}
+                          />
+                        ) : (
+                          <OutlinedTextField
+                            label="4-digit PIN"
+                            mono
+                            required
+                            placeholder="4444"
+                            value={newProfilePin}
+                            onChange={setNewProfilePin}
+                          />
+                        )}
                       </div>
                       <Button
                         type="submit"
@@ -3034,12 +3099,62 @@ export function AlbarkaMaterial3ERP({
                     </form>
                   </Card>
 
+                  {/* Rotate Super Admin Password */}
+                  <Card className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h2 className="text-base font-semibold text-md-on-surface">
+                          Rotate Super Admin password
+                        </h2>
+                        <p className="text-xs text-md-on-surface-variant mt-0.5">
+                          Updates your salted scrypt password hash in MongoDB Atlas immediately.
+                        </p>
+                      </div>
+                      <StatusChip label="scrypt KDF" variant="success" />
+                    </div>
+                    <form onSubmit={handleChangeAdminPassword} className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <OutlinedTextField
+                          label="Current password"
+                          type="password"
+                          required
+                          value={currentAdminPassword}
+                          onChange={setCurrentAdminPassword}
+                        />
+                        <OutlinedTextField
+                          label="New password (min 8)"
+                          type="password"
+                          required
+                          value={nextAdminPassword}
+                          onChange={setNextAdminPassword}
+                        />
+                        <OutlinedTextField
+                          label="Confirm new password"
+                          type="password"
+                          required
+                          value={confirmAdminPassword}
+                          onChange={setConfirmAdminPassword}
+                        />
+                      </div>
+                      <Button
+                        type="submit"
+                        variant="tonal"
+                        disabled={savingAdminPassword}
+                        icon={<KeyRound className="w-4 h-4" strokeWidth={1.8} />}
+                      >
+                        {savingAdminPassword ? "Updating…" : "Update Super Admin password"}
+                      </Button>
+                    </form>
+                  </Card>
+
                   {/* Existing Staff Profiles Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {users.map((u) => {
                       const isSelf = u.id === currentUser.id;
                       const adminCount = users.filter((x) => x.role === "ADMIN").length;
                       const cannotRemove = isSelf || (u.role === "ADMIN" && adminCount <= 1);
+                      const isPasswordProfile =
+                        u.role === "ADMIN" || u.authType === "PASSWORD";
                       return (
                         <Card key={u.id} className="space-y-3 flex flex-col justify-between">
                           <div className="space-y-2.5">
@@ -3059,7 +3174,9 @@ export function AlbarkaMaterial3ERP({
                                 }
                               />
                               <span className="font-mono text-xs text-md-on-surface-variant">
-                                PIN: {u.pin}
+                                {isPasswordProfile
+                                  ? "Password"
+                                  : `PIN: ${u.pin || "****"}`}
                               </span>
                             </div>
                             <div>

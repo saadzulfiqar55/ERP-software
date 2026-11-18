@@ -81,3 +81,31 @@ export async function assertSuperAdmin(
   }
   return actor;
 }
+
+/**
+ * Strips `passwordHash` from all client responses and hides credentials (`pin`)
+ * for non-demo accounts (and always hides ADMIN credentials) unless an authenticated Super Admin is managing staff.
+ */
+export function sanitizeUserForClient(
+  user: UserProfile,
+  viewer: UserProfile | null
+): UserProfile {
+  const { passwordHash: _omitHash, ...rest } = user;
+  void _omitHash;
+
+  const isViewerAdmin = viewer?.role === "ADMIN";
+  const showDemoPin = Boolean(user.isDemoAccount && user.role !== "ADMIN");
+
+  return {
+    ...rest,
+    authType:
+      user.role === "ADMIN" || user.authType === "PASSWORD" ? "PASSWORD" : "PIN",
+    isDemoAccount: showDemoPin,
+    pin:
+      user.role === "ADMIN" || user.authType === "PASSWORD"
+        ? ""
+        : isViewerAdmin || showDemoPin
+        ? user.pin || ""
+        : "",
+  };
+}

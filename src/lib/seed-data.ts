@@ -14,7 +14,12 @@ export const INITIAL_USERS: UserProfile[] = [
     role: "ADMIN",
     title: "Owner & Super Admin",
     email: "admin@albarkarestaurant.pk",
-    pin: "1111",
+    pin: "",
+    authType: "PASSWORD",
+    isDemoAccount: false,
+    // Salted scrypt hash for the default Super Admin password (overridable via ADMIN_PASSWORD env var)
+    passwordHash:
+      "scrypt$cf29d13218fd4a8a717131b2ea5846ee$a6c00c5fec6ca8a0839e9445047ca2c1d369f536e2dfd54235b54c41fda8b4db7b917df880bfc5f155bf43dba150ad5df50c3a8d79fc61f085e5acac8e54cfc7",
     avatarInitials: "TM",
     badgeColor: "crimson",
     permissions: {
@@ -32,6 +37,8 @@ export const INITIAL_USERS: UserProfile[] = [
     title: "Branch & Floor Manager",
     email: "manager@albarkarestaurant.pk",
     pin: "2222",
+    authType: "PIN",
+    isDemoAccount: true,
     avatarInitials: "UA",
     badgeColor: "indigo",
     permissions: {
@@ -49,6 +56,8 @@ export const INITIAL_USERS: UserProfile[] = [
     title: "Senior POS Cashier",
     email: "cashier@albarkarestaurant.pk",
     pin: "3333",
+    authType: "PIN",
+    isDemoAccount: true,
     avatarInitials: "UF",
     badgeColor: "slate",
     permissions: {

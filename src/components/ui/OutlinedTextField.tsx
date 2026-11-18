@@ -7,7 +7,7 @@ export interface OutlinedTextFieldProps {
   label: string;
   value: string | number;
   onChange?: (val: string) => void;
-  type?: "text" | "number" | "email" | "date";
+  type?: "text" | "number" | "email" | "date" | "password";
   placeholder?: string;
   helperText?: string;
   errorText?: string;

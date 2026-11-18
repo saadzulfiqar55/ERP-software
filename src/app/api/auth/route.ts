@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { sanitizeUserForClient } from "@/core/auth";
 import { readDbAsync, writeDbAsync } from "@/lib/db";
 import { signJwt, verifyJwt } from "@/lib/auth-jwt";
+import { timingSafeEqualStrings, verifyPassword } from "@/lib/password";
 import { ActiveSession, SessionAuditLog } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +43,7 @@ export async function GET() {
   const user = db.users.find((u) => u.id === decoded.sub) || null;
   return NextResponse.json({
     authenticated: Boolean(user),
-    user,
+    user: user ? sanitizeUserForClient(user, user) : null,
     decodedJwt: decoded,
     activeSession: db.activeSession,
     sessionAuditLogs: db.sessionAuditLogs,
@@ -139,28 +141,65 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         authenticated: true,
-        user,
+        user: sanitizeUserForClient(user, user),
         decodedJwt: fullPayload,
         activeSession: updatedSession,
         sessionAuditLogs: db.sessionAuditLogs,
       });
     }
 
-    // 3. LOGIN (PIN OR OAUTH SSO) WITH SINGLE-SESSION LOCK ENFORCEMENT
+    // 3. LOGIN (PASSWORD FOR ADMIN, PIN FOR STAFF DEMO) WITH SINGLE-SESSION LOCK ENFORCEMENT
     const targetUser = db.users.find((u) => u.id === body.userId);
     if (!targetUser) {
       return NextResponse.json({ error: "Profile not found" }, { status: 404 });
     }
 
-    const authMethod: "JWT_PIN" | "OAUTH_SSO" =
-      body.authMethod === "OAUTH_SSO" ? "OAUTH_SSO" : "JWT_PIN";
+    const requiresPassword =
+      targetUser.role === "ADMIN" || targetUser.authType === "PASSWORD";
 
-    if (authMethod === "JWT_PIN" && body.pin !== targetUser.pin) {
-      return NextResponse.json(
-        { error: `Invalid 4-digit PIN for ${targetUser.name}.` },
-        { status: 401 }
+    if (requiresPassword) {
+      const providedPassword =
+        typeof body.password === "string" ? body.password : "";
+      if (!providedPassword) {
+        return NextResponse.json(
+          { error: `Password required for ${targetUser.name}.` },
+          { status: 401 }
+        );
+      }
+
+      const envAdminPassword = process.env.ADMIN_PASSWORD?.trim();
+      const envOverrideMatches =
+        Boolean(envAdminPassword) &&
+        targetUser.id === "user-admin-1" &&
+        !targetUser.passwordUpdatedInDb &&
+        timingSafeEqualStrings(providedPassword, envAdminPassword!);
+
+      const hashMatches = verifyPassword(
+        providedPassword,
+        targetUser.passwordHash
       );
+
+      if (!envOverrideMatches && !hashMatches) {
+        return NextResponse.json(
+          { error: `Invalid Super Admin password for ${targetUser.name}.` },
+          { status: 401 }
+        );
+      }
+    } else {
+      const providedPin = typeof body.pin === "string" ? body.pin.trim() : "";
+      if (
+        !targetUser.pin ||
+        !providedPin ||
+        !timingSafeEqualStrings(providedPin, targetUser.pin)
+      ) {
+        return NextResponse.json(
+          { error: `Invalid 4-digit PIN for ${targetUser.name}.` },
+          { status: 401 }
+        );
+      }
     }
+
+    const authMethod: "JWT_PIN" | "OAUTH_SSO" = "JWT_PIN";
 
     // STRICT SINGLE-PROFILE LOCK CHECK:
     // If another profile is already logged in, block unless forceTakeover is authorized
@@ -249,7 +288,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       authenticated: true,
-      user: targetUser,
+      user: sanitizeUserForClient(targetUser, targetUser),
       decodedJwt: fullPayload,
       activeSession: newSession,
       sessionAuditLogs: db.sessionAuditLogs,

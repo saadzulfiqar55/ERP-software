@@ -3,6 +3,7 @@ import { appendAuditLog } from "@/core/audit";
 import {
   assertActorPermission,
   hasGranularPermission,
+  sanitizeUserForClient,
   tryResolveOptionalActor,
 } from "@/core/auth";
 import { withTransaction } from "@/core/db";
@@ -43,6 +44,7 @@ function buildScopedStateResponse(
 
   return {
     ...db,
+    users: db.users.map((u) => sanitizeUserForClient(u, actor)),
     mongoConfig: canManageSettings
       ? getPublicMongoConfig(db.mongoConfig)
       : {

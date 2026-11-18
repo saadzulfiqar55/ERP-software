@@ -47,7 +47,11 @@ export interface UserProfile {
   role: UserRole;
   title: string;
   email: string;
-  pin: string;
+  pin?: string;
+  passwordHash?: string;
+  authType?: "PASSWORD" | "PIN";
+  isDemoAccount?: boolean;
+  passwordUpdatedInDb?: boolean;
   avatarInitials: string;
   badgeColor: string;
   granularPermissions?: ERPPermission[];
