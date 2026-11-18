@@ -63,11 +63,17 @@ function getClientCache(): Map<string, Promise<MongoClient>> {
   return globalThis.__albarkaMongoClients;
 }
 
+export function normalizeMongoUri(uri?: string): string {
+  if (!uri) return "";
+  return uri.trim().replace(/^["']|["']$/g, "").trim();
+}
+
 export function resolveIsolatedDbName(requested?: string): string {
-  const candidate =
+  const raw =
     requested?.trim() ||
     process.env.MONGODB_DB_NAME?.trim() ||
     DEFAULT_ISOLATED_DB_NAME;
+  const candidate = raw.replace(/^["']|["']$/g, "").trim() || DEFAULT_ISOLATED_DB_NAME;
 
   if (PROTECTED_FOREIGN_DBS.has(candidate.toLowerCase())) {
     throw new Error(
@@ -101,7 +107,7 @@ export function maskMongoUri(uri: string): string {
  * Ensures the URI never implicitly targets `votix` in its path component.
  */
 export function assertSafeMongoUri(uri: string): void {
-  const trimmed = uri.trim();
+  const trimmed = normalizeMongoUri(uri);
   if (!trimmed.startsWith("mongodb://") && !trimmed.startsWith("mongodb+srv://")) {
     throw new Error("Provide a valid mongodb:// or mongodb+srv:// URI.");
   }
@@ -162,7 +168,7 @@ async function getMongoClient(uri: string): Promise<MongoClient> {
 }
 
 export async function pingMongoConnection(
-  uri: string,
+  rawUri: string,
   requestedDbName?: string
 ): Promise<{
   connected: boolean;
@@ -170,6 +176,7 @@ export async function pingMongoConnection(
   dbName: string;
   message: string;
 }> {
+  const uri = normalizeMongoUri(rawUri);
   let dbName = DEFAULT_ISOLATED_DB_NAME;
   try {
     dbName = resolveIsolatedDbName(requestedDbName);
@@ -188,7 +195,17 @@ export async function pingMongoConnection(
       engine: "Local JSON Store (Fallback Active)",
       dbName,
       message:
-        "Provide a valid mongodb:// or mongodb+srv:// URI to enable live MongoDB storage.",
+        "Provide a valid mongodb:// or mongodb+srv:// URI (or set MONGODB_URI in Vercel Environment Variables without quotes) to enable live MongoDB storage.",
+    };
+  }
+
+  if (isMaskedMongoUri(uri)) {
+    return {
+      connected: false,
+      engine: "Local JSON Store (Credentials Required)",
+      dbName,
+      message:
+        "URI password is masked (****). Set MONGODB_URI in Vercel Environment Variables (no quotes) or paste the full connection URI with your password.",
     };
   }
 

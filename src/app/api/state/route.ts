@@ -10,7 +10,7 @@ import { withTransaction } from "@/core/db";
 import { toMinorUnits } from "@/core/money";
 import { sanitizeNoSqlPayload } from "@/core/validation";
 import { DatabaseSchema, getPublicMongoConfig, readDbAsync } from "@/lib/db";
-import { isMaskedMongoUri, pingMongoConnection } from "@/lib/mongodb";
+import { isMaskedMongoUri, normalizeMongoUri, pingMongoConnection } from "@/lib/mongodb";
 import { MongoDBConfig, PRAConfig, Product, UserProfile } from "@/lib/types";
 import { AccountingService } from "@/modules/accounting/accounting.service";
 import { InventoryService } from "@/modules/inventory/inventory.service";
@@ -105,15 +105,16 @@ export async function PUT(request: Request) {
         const actor = await assertActorPermission(txDb, "settings:pra:manage");
         resolvedActor = actor;
         const incoming = body.mongoConfig as Partial<MongoDBConfig>;
-        const incomingUri = incoming.uri?.trim() || "";
+        const incomingUri = normalizeMongoUri(incoming.uri);
+        const currentUri = normalizeMongoUri(txDb.mongoConfig.uri);
         const isStaleLocalDefault =
           incomingUri.startsWith("mongodb://127.0.0.1:27017/") &&
-          txDb.mongoConfig.uri.startsWith("mongodb+srv://");
+          currentUri.startsWith("mongodb+srv://");
 
         const preservedUri =
           incomingUri && !isMaskedMongoUri(incomingUri) && !isStaleLocalDefault
             ? incomingUri
-            : txDb.mongoConfig.uri;
+            : currentUri;
 
         const nextMongo: MongoDBConfig = {
           ...txDb.mongoConfig,

@@ -1046,10 +1046,12 @@ export function AlbarkaMaterial3ERP({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mongoConfig }),
     });
+    const data = await res.json();
     if (res.ok) {
-      const data = await res.json();
       setMongoConfig(data.mongoConfig);
       notifySaved(data.mongoConfig.lastStatus);
+    } else {
+      notifySaved(data.error || "Failed to test MongoDB connection.");
     }
   }
 

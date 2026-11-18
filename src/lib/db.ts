@@ -14,6 +14,7 @@ import {
   loadSnapshotFromMongo,
   maskMongoUri,
   MongoSyncSection,
+  normalizeMongoUri,
   resolveIsolatedDbName,
   syncSnapshotToMongoIfAvailable,
 } from "./mongodb";
@@ -89,8 +90,9 @@ function readDotEnvLocalValue(key: string): string | undefined {
 }
 
 function getEnvMongoConfig(): MongoDBConfig | null {
-  const envUri =
-    process.env.MONGODB_URI?.trim() || readDotEnvLocalValue("MONGODB_URI");
+  const envUri = normalizeMongoUri(
+    process.env.MONGODB_URI || readDotEnvLocalValue("MONGODB_URI")
+  );
   if (!envUri) return null;
 
   const envDbName =
