@@ -44,6 +44,7 @@ export interface UserProfile {
   branchId?: string;
   allowedBranches?: string[];
   name: string;
+  username?: string;
   role: UserRole;
   title: string;
   email: string;

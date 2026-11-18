@@ -125,7 +125,7 @@ const DEFAULT_CASHIER_SHIFT: CashierShift = {
   tenantId: "TENANT_ALBARKA",
   branchId: "BRANCH_GULBERG_01",
   openedAt: "2026-11-17T08:00:00.000Z",
-  openedBy: "Haji Tariq Mahmood (ADMIN)",
+  openedBy: "Saad (ADMIN)",
   openingFloatMinor: 2500000, // PKR 25,000 opening float in paisa
   cashSalesMinor: 603200, // PKR 6,032
   cardSalesMinor: 490800, // PKR 4,908
@@ -140,7 +140,7 @@ const DEFAULT_FISCAL_PERIODS: FiscalPeriod[] = [
     label: "October 2026 (Closed Fiscal Period)",
     isLocked: true,
     lockedAt: "2026-11-02T10:00:00.000Z",
-    lockedBy: "Haji Tariq Mahmood (ADMIN)",
+    lockedBy: "Saad (ADMIN)",
   },
   {
     periodKey: "2026-11",
@@ -168,7 +168,7 @@ function buildDefaults(): DatabaseSchema {
         branchId: "BRANCH_GULBERG_01",
         timestamp: "2026-11-17T08:00:00.000Z",
         actorId: "user-admin-1",
-        actorName: "Haji Tariq Mahmood",
+        actorName: "Saad",
         actorRole: "ADMIN",
         module: "POS",
         action: "CREATE",
@@ -201,8 +201,21 @@ function mergeWithDefaults(
     parsed.users && parsed.users.length > 0 ? parsed.users : INITIAL_USERS;
   const normalizedUsers = rawUsers.map((u) => {
     if (u.role === "ADMIN") {
+      const isLegacyPrimaryAdmin =
+        u.id === "user-admin-1" && u.name === "Haji Tariq Mahmood";
+      const envAdminUsername = process.env.ADMIN_USERNAME?.trim().toLowerCase();
       return {
         ...u,
+        name: isLegacyPrimaryAdmin ? "Saad" : u.name,
+        username:
+          (u.id === "user-admin-1" ? envAdminUsername : undefined) ||
+          u.username ||
+          (u.id === "user-admin-1" ? "saad" : u.email.split("@")[0]),
+        email:
+          isLegacyPrimaryAdmin && u.email === "admin@albarkarestaurant.pk"
+            ? "saad@albarkarestaurant.pk"
+            : u.email,
+        avatarInitials: isLegacyPrimaryAdmin ? "SA" : u.avatarInitials,
         pin: "",
         authType: "PASSWORD" as const,
         isDemoAccount: false,
@@ -211,6 +224,13 @@ function mergeWithDefaults(
     }
     return {
       ...u,
+      username:
+        u.username ||
+        (u.id === "user-manager-1"
+          ? "manager"
+          : u.id === "user-cashier-1"
+          ? "cashier"
+          : u.email.split("@")[0]),
       authType: u.authType || ("PIN" as const),
       isDemoAccount:
         u.isDemoAccount ?? (u.id === "user-manager-1" || u.id === "user-cashier-1"),

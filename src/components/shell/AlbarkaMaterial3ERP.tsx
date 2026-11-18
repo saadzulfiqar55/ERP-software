@@ -313,6 +313,7 @@ export function AlbarkaMaterial3ERP({
 
   // Super Admin Staff Profile Management Form
   const [newProfileName, setNewProfileName] = useState<string>("");
+  const [newProfileUsername, setNewProfileUsername] = useState<string>("");
   const [newProfileRole, setNewProfileRole] = useState<UserRole>("CASHIER");
   const [newProfileTitle, setNewProfileTitle] = useState<string>("");
   const [newProfileEmail, setNewProfileEmail] = useState<string>("");
@@ -1112,6 +1113,7 @@ export function AlbarkaMaterial3ERP({
         body: JSON.stringify({
           action: "CREATE",
           name: newProfileName.trim(),
+          username: newProfileUsername.trim(),
           role: newProfileRole,
           title: newProfileTitle.trim(),
           email: newProfileEmail.trim(),
@@ -1127,6 +1129,7 @@ export function AlbarkaMaterial3ERP({
       if (data.users) setUsers(data.users);
       if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
       setNewProfileName("");
+      setNewProfileUsername("");
       setNewProfileTitle("");
       setNewProfileEmail("");
       setNewProfilePin("");
@@ -3036,13 +3039,21 @@ export function AlbarkaMaterial3ERP({
                     </div>
 
                     <form onSubmit={handleCreateProfile} className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                         <OutlinedTextField
                           label="Full name"
                           required
                           placeholder="e.g. Bilal Ahmed"
                           value={newProfileName}
                           onChange={setNewProfileName}
+                        />
+                        <OutlinedTextField
+                          label="Username"
+                          mono
+                          required
+                          placeholder="e.g. bilal"
+                          value={newProfileUsername}
+                          onChange={setNewProfileUsername}
                         />
                         <OutlinedTextField
                           label="Hierarchy role"
@@ -3184,7 +3195,7 @@ export function AlbarkaMaterial3ERP({
                                 {u.name}
                               </div>
                               <div className="text-xs text-md-on-surface-variant">
-                                {u.title} · {u.email}
+                                @{u.username || u.email.split("@")[0]} · {u.title} · {u.email}
                               </div>
                             </div>
                             <div className="text-[11px] text-md-on-surface-variant pt-1">

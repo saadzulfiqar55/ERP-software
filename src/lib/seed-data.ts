@@ -10,17 +10,18 @@ import {
 export const INITIAL_USERS: UserProfile[] = [
   {
     id: "user-admin-1",
-    name: "Haji Tariq Mahmood",
+    name: "Saad",
+    username: "saad",
     role: "ADMIN",
     title: "Owner & Super Admin",
-    email: "admin@albarkarestaurant.pk",
+    email: "saad@albarkarestaurant.pk",
     pin: "",
     authType: "PASSWORD",
     isDemoAccount: false,
     // Salted scrypt hash for the default Super Admin password (overridable via ADMIN_PASSWORD env var)
     passwordHash:
       "scrypt$cf29d13218fd4a8a717131b2ea5846ee$a6c00c5fec6ca8a0839e9445047ca2c1d369f536e2dfd54235b54c41fda8b4db7b917df880bfc5f155bf43dba150ad5df50c3a8d79fc61f085e5acac8e54cfc7",
-    avatarInitials: "TM",
+    avatarInitials: "SA",
     badgeColor: "crimson",
     permissions: {
       canEditPraSettings: true,
@@ -33,6 +34,7 @@ export const INITIAL_USERS: UserProfile[] = [
   {
     id: "user-manager-1",
     name: "Usman Ali Cheema",
+    username: "manager",
     role: "MANAGER",
     title: "Branch & Floor Manager",
     email: "manager@albarkarestaurant.pk",
@@ -52,6 +54,7 @@ export const INITIAL_USERS: UserProfile[] = [
   {
     id: "user-cashier-1",
     name: "Umar Farooq",
+    username: "cashier",
     role: "CASHIER",
     title: "Senior POS Cashier",
     email: "cashier@albarkarestaurant.pk",
@@ -625,7 +628,7 @@ export const INITIAL_ORDERS: Order[] = [
       "https://e.pra.punjab.gov.pk/verify?inv=PRA-849201-261116-001001&ntn=7482910-8&amt=6032&tax=832",
     praSyncStatus: "SYNCED",
     praResponseCode: "100",
-    cashierName: "Haji Tariq Mahmood (Admin)",
+    cashierName: "Saad (Admin)",
   },
   {
     id: "ord-sample-2",

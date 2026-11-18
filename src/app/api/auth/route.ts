@@ -148,10 +148,31 @@ export async function POST(request: Request) {
       });
     }
 
-    // 3. LOGIN (PASSWORD FOR ADMIN, PIN FOR STAFF DEMO) WITH SINGLE-SESSION LOCK ENFORCEMENT
-    const targetUser = db.users.find((u) => u.id === body.userId);
+    // 3. LOGIN (USERNAME + PASSWORD FOR ADMIN, PIN FOR STAFF DEMO) WITH SINGLE-SESSION LOCK ENFORCEMENT
+    const identifier =
+      typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
+    const envAdminUsername = process.env.ADMIN_USERNAME?.trim().toLowerCase();
+
+    let targetUser = body.userId
+      ? db.users.find((u) => u.id === body.userId)
+      : undefined;
+
+    if (!targetUser && identifier) {
+      targetUser = db.users.find(
+        (u) =>
+          u.username?.toLowerCase() === identifier ||
+          u.email.toLowerCase() === identifier
+      );
+      if (!targetUser && envAdminUsername && identifier === envAdminUsername) {
+        targetUser = db.users.find((u) => u.id === "user-admin-1");
+      }
+    }
+
     if (!targetUser) {
-      return NextResponse.json({ error: "Profile not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Invalid username or credentials." },
+        { status: 401 }
+      );
     }
 
     const requiresPassword =
@@ -162,7 +183,7 @@ export async function POST(request: Request) {
         typeof body.password === "string" ? body.password : "";
       if (!providedPassword) {
         return NextResponse.json(
-          { error: `Password required for ${targetUser.name}.` },
+          { error: "Username and password are required." },
           { status: 401 }
         );
       }
@@ -181,7 +202,7 @@ export async function POST(request: Request) {
 
       if (!envOverrideMatches && !hashMatches) {
         return NextResponse.json(
-          { error: `Invalid Super Admin password for ${targetUser.name}.` },
+          { error: "Invalid Super Admin username or password." },
           { status: 401 }
         );
       }

@@ -42,9 +42,14 @@ function buildScopedStateResponse(
         }))
     : [];
 
+  const visibleUsers =
+    actor?.role === "ADMIN"
+      ? db.users
+      : db.users.filter((u) => u.role !== "ADMIN");
+
   return {
     ...db,
-    users: db.users.map((u) => sanitizeUserForClient(u, actor)),
+    users: visibleUsers.map((u) => sanitizeUserForClient(u, actor)),
     mongoConfig: canManageSettings
       ? getPublicMongoConfig(db.mongoConfig)
       : {

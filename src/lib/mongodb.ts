@@ -12,6 +12,7 @@ export const DEFAULT_ISOLATED_DB_NAME = "albarka_erp";
 const PROTECTED_FOREIGN_DBS = new Set(["votix", "admin", "local", "config"]);
 
 export const MONGODB_COLLECTIONS = {
+  USERS: "users",
   PRODUCTS: "products",
   ORDERS: "orders",
   INVOICES: "invoices",
@@ -254,6 +255,7 @@ export async function syncSnapshotToMongoIfAvailable(
     );
 
     await Promise.all([
+      replaceCollectionDocs(db, MONGODB_COLLECTIONS.USERS, snapshot.users),
       replaceCollectionDocs(db, MONGODB_COLLECTIONS.PRODUCTS, snapshot.products),
       replaceCollectionDocs(db, MONGODB_COLLECTIONS.ORDERS, snapshot.orders),
       replaceCollectionDocs(

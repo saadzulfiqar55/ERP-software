@@ -123,6 +123,10 @@ export async function POST(request: Request) {
       }
 
       const name = String(body.name || "").trim();
+      const username = String(body.username || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]/g, "");
       const role = String(body.role || "CASHIER").toUpperCase() as UserRole;
       const title = String(body.title || "").trim();
       const email = String(body.email || "").trim().toLowerCase();
@@ -139,6 +143,11 @@ export async function POST(request: Request) {
         throw new Error("Provide a valid work email address.");
       }
 
+      const resolvedUsername = username || email.split("@")[0];
+      if (!resolvedUsername || resolvedUsername.length < 2) {
+        throw new Error("Username must be at least 2 characters.");
+      }
+
       if (role === "ADMIN") {
         if (password.length < 8) {
           throw new Error(
@@ -152,12 +161,20 @@ export async function POST(request: Request) {
       if (txDb.users.some((u) => u.email.toLowerCase() === email)) {
         throw new Error("A profile with this email already exists.");
       }
+      if (
+        txDb.users.some(
+          (u) => u.username && u.username.toLowerCase() === resolvedUsername
+        )
+      ) {
+        throw new Error("A profile with this username already exists.");
+      }
 
       const created: UserProfile = {
         id: `user-${role.toLowerCase()}-${Date.now()}`,
         tenantId: DEFAULT_TENANT_ID,
         branchId: DEFAULT_BRANCH_ID,
         name,
+        username: resolvedUsername,
         role,
         title:
           title ||
