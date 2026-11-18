@@ -53,7 +53,11 @@ export interface DatabaseSchema {
 }
 
 const IS_SERVERLESS = Boolean(
-  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY
+  process.env.VERCEL ||
+    process.env.VERCEL_ENV ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.NETLIFY ||
+    process.cwd().startsWith("/var/task")
 );
 const DB_DIR = IS_SERVERLESS
   ? path.join("/tmp", "albarka-data")
