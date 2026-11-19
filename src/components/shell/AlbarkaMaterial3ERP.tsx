@@ -1917,7 +1917,7 @@ export function AlbarkaMaterial3ERP({
                               key={variant.id}
                               type="button"
                               onClick={() => addToCart(product, variant)}
-                              className="w-full h-10 px-4 rounded-full border-0 bg-md-surface-container-low hover:bg-md-primary text-md-on-surface hover:text-md-on-primary text-xs font-medium flex items-center justify-between transition-all duration-150 hover:-translate-y-[1px] hover:scale-[1.01] active:scale-[0.985]"
+                              className="w-full h-10 px-4 rounded-full border-0 bg-md-surface-container-low hover:bg-md-primary text-md-on-surface hover:text-md-on-primary text-xs font-medium flex items-center justify-between transition-all duration-150 hover:-translate-y-px hover:scale-[1.01] active:scale-[0.985]"
                             >
                               <span>{variant.name}</span>
                               <span className="font-mono tabular-nums font-semibold">

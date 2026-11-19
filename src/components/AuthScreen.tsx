@@ -150,7 +150,7 @@ export default function AuthScreen({
 
   return (
     <div className="min-h-screen bg-md-surface flex items-center justify-center p-4 sm:p-8">
-      <div className="max-w-5xl w-full bg-md-surface-container-lowest border-0 shadow-[var(--md-card-shadow)] rounded-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12">
+      <div className="max-w-5xl w-full bg-md-surface-container-lowest border-0 shadow-(--md-card-shadow) rounded-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12">
         {/* Left 7 Cols: Role Mode & Demo Staff Selection */}
         <div className="lg:col-span-7 p-6 sm:p-10 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-md-divider">
           <div>
@@ -506,7 +506,7 @@ export default function AuthScreen({
                       type="button"
                       disabled={loading || !selectedStaffUser}
                       onClick={() => handleKeypadPress(digit)}
-                      className="h-12 rounded-full border-0 bg-md-surface-container-lowest hover:bg-md-secondary-container shadow-xs font-mono font-medium text-base text-md-on-surface transition-all duration-150 hover:-translate-y-[1px] hover:scale-[1.02] active:scale-[0.97]"
+                      className="h-12 rounded-full border-0 bg-md-surface-container-lowest hover:bg-md-secondary-container shadow-xs font-mono font-medium text-base text-md-on-surface transition-all duration-150 hover:-translate-y-px hover:scale-[1.02] active:scale-[0.97]"
                     >
                       {digit}
                     </button>
@@ -514,21 +514,21 @@ export default function AuthScreen({
                   <button
                     type="button"
                     onClick={() => handleKeypadPress("CLEAR")}
-                    className="h-12 rounded-full border-0 bg-md-error-container hover:brightness-95 font-medium text-xs text-md-on-error-container transition-all duration-150 hover:-translate-y-[1px] hover:scale-[1.02] active:scale-[0.97]"
+                    className="h-12 rounded-full border-0 bg-md-error-container hover:brightness-95 font-medium text-xs text-md-on-error-container transition-all duration-150 hover:-translate-y-px hover:scale-[1.02] active:scale-[0.97]"
                   >
                     Clear
                   </button>
                   <button
                     type="button"
                     onClick={() => handleKeypadPress("0")}
-                    className="h-12 rounded-full border-0 bg-md-surface-container-lowest hover:bg-md-secondary-container shadow-xs font-mono font-medium text-base text-md-on-surface transition-all duration-150 hover:-translate-y-[1px] hover:scale-[1.02] active:scale-[0.97]"
+                    className="h-12 rounded-full border-0 bg-md-surface-container-lowest hover:bg-md-secondary-container shadow-xs font-mono font-medium text-base text-md-on-surface transition-all duration-150 hover:-translate-y-px hover:scale-[1.02] active:scale-[0.97]"
                   >
                     0
                   </button>
                   <button
                     type="submit"
                     disabled={loading || pinInput.length < 4 || !selectedStaffUser}
-                    className="h-12 rounded-full border-0 bg-md-primary hover:bg-md-primary-strong disabled:opacity-45 text-md-on-primary shadow-sm font-medium text-sm transition-all duration-150 hover:-translate-y-[1px] hover:scale-[1.02] active:scale-[0.97]"
+                    className="h-12 rounded-full border-0 bg-md-primary hover:bg-md-primary-strong disabled:opacity-45 text-md-on-primary shadow-sm font-medium text-sm transition-all duration-150 hover:-translate-y-px hover:scale-[1.02] active:scale-[0.97]"
                   >
                     {loading ? "..." : "Sign In"}
                   </button>

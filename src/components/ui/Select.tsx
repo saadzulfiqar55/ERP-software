@@ -105,7 +105,7 @@ function SelectMenuPortal({
         width: coords.width,
         transform: coords.openUpward ? "translateY(-100%)" : undefined,
       }}
-      className="z-50 rounded-2xl overflow-hidden bg-md-surface-container-lowest p-1.5 border border-md-outline-variant/40 shadow-[var(--md-card-shadow-hover)]"
+      className="z-50 rounded-2xl overflow-hidden bg-md-surface-container-lowest p-1.5 border border-md-outline-variant/40 shadow-(--md-card-shadow-hover)"
     >
       <div className="max-h-60 overflow-y-auto pr-0.5 space-y-0.5">
         {placeholderOption && (

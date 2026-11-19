@@ -32,12 +32,12 @@ export function Button({
 
   const variantStyles = {
     filled:
-      "border-0 bg-md-primary text-md-on-primary font-medium tracking-[0.01em] shadow-[0_2px_6px_rgba(54,97,142,0.20)] hover:bg-md-primary-strong hover:-translate-y-[1px] hover:scale-[1.01] hover:shadow-[0_6px_16px_rgba(54,97,142,0.28)] active:translate-y-0 active:scale-[0.985] disabled:opacity-40 disabled:pointer-events-none",
+      "border-0 bg-md-primary text-md-on-primary font-medium tracking-[0.01em] shadow-[0_2px_6px_rgba(54,97,142,0.20)] hover:bg-md-primary-strong hover:-translate-y-px hover:scale-[1.01] hover:shadow-[0_6px_16px_rgba(54,97,142,0.28)] active:translate-y-0 active:scale-[0.985] disabled:opacity-40 disabled:pointer-events-none",
     tonal:
-      "border-0 bg-md-secondary-container text-md-on-secondary-container font-medium tracking-[0.01em] hover:bg-md-primary-container hover:text-md-on-primary-container hover:-translate-y-[1px] hover:scale-[1.01] hover:shadow-[0_4px_12px_rgba(16,28,43,0.08)] active:translate-y-0 active:scale-[0.985] disabled:opacity-40 disabled:pointer-events-none",
+      "border-0 bg-md-secondary-container text-md-on-secondary-container font-medium tracking-[0.01em] hover:bg-md-primary-container hover:text-md-on-primary-container hover:-translate-y-px hover:scale-[1.01] hover:shadow-[0_4px_12px_rgba(16,28,43,0.08)] active:translate-y-0 active:scale-[0.985] disabled:opacity-40 disabled:pointer-events-none",
     outlined:
-      "border-0 bg-md-surface-container-low text-md-on-surface font-medium tracking-[0.01em] shadow-[0_1px_3px_rgba(25,28,32,0.05)] hover:bg-md-secondary-container hover:text-md-on-secondary-container hover:-translate-y-[1px] hover:scale-[1.01] hover:shadow-[0_4px_12px_rgba(16,28,43,0.08)] active:translate-y-0 active:scale-[0.985] disabled:opacity-40 disabled:pointer-events-none",
-    text: "border-0 bg-transparent text-md-primary font-medium tracking-[0.01em] px-3.5 hover:bg-md-primary-container/35 hover:-translate-y-[0.5px] active:scale-[0.985] disabled:opacity-40 disabled:pointer-events-none",
+      "border-0 bg-md-surface-container-low text-md-on-surface font-medium tracking-[0.01em] shadow-[0_1px_3px_rgba(25,28,32,0.05)] hover:bg-md-secondary-container hover:text-md-on-secondary-container hover:-translate-y-px hover:scale-[1.01] hover:shadow-[0_4px_12px_rgba(16,28,43,0.08)] active:translate-y-0 active:scale-[0.985] disabled:opacity-40 disabled:pointer-events-none",
+    text: "border-0 bg-transparent text-md-primary font-medium tracking-[0.01em] px-3.5 hover:bg-md-primary-container/35 hover:translate-y-[-0.5px] active:scale-[0.985] disabled:opacity-40 disabled:pointer-events-none",
     icon: "border-0 bg-transparent text-md-on-surface-variant hover:bg-md-surface-container-high hover:text-md-on-surface hover:scale-[1.04] active:scale-95",
   }[variant];
 

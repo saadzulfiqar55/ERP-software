@@ -81,8 +81,8 @@ export function FilterChip({
       aria-pressed={selected}
       className={`border-0 h-8 px-3.5 rounded-lg inline-flex items-center gap-1.5 text-xs font-medium tracking-[0.01em] transition-all duration-200 ease-out select-none ${
         selected
-          ? "bg-md-secondary-container text-md-on-secondary-container shadow-[0_2px_6px_rgba(16,28,43,0.08)] hover:-translate-y-[1px]"
-          : "bg-md-surface-container-low text-md-on-surface-variant hover:bg-md-surface-container-high hover:text-md-on-surface hover:-translate-y-[1px] hover:scale-[1.015]"
+          ? "bg-md-secondary-container text-md-on-secondary-container shadow-[0_2px_6px_rgba(16,28,43,0.08)] hover:-translate-y-px"
+          : "bg-md-surface-container-low text-md-on-surface-variant hover:bg-md-surface-container-high hover:text-md-on-surface hover:-translate-y-px hover:scale-[1.015]"
       }`}
     >
       {selected && (
