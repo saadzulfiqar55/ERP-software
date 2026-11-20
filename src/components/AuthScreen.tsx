@@ -19,6 +19,7 @@ import {
   StatusChip,
   ThemeToggle,
 } from "@/components/ui/m3";
+import { SovraLogo } from "@/components/ui/SovraLogo";
 import { hasGranularPermission } from "@/core/auth/permissions";
 
 interface AuthScreenProps {
@@ -157,13 +158,11 @@ export default function AuthScreen({
             {/* Brand Row */}
             <div className="flex items-start justify-between gap-4 mb-6">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-md-primary text-md-on-primary flex items-center justify-center font-bold text-xl shrink-0">
-                  A
-                </div>
+                <SovraLogo size={48} className="shrink-0" />
                 <div>
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <h1 className="text-[22px] leading-[28px] font-normal text-md-on-surface">
-                      Albarka ERP &amp; POS
+                      Sovra ERP &amp; POS
                     </h1>
                     <StatusChip label="Material 3" variant="primary" />
                   </div>

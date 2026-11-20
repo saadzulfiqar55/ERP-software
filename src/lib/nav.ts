@@ -1,9 +1,9 @@
 import { ERPPermission } from "./types";
 
 export const ERP_BRAND_CONFIG = {
-  productName: "Albarka ERP",
+  productName: "Sovra ERP",
   workspaceSubtitle: "Enterprise & POS Workspace",
-  logoLetter: "A",
+  logoLetter: "S",
 };
 
 export type ERPNavKey =

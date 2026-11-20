@@ -89,6 +89,8 @@ import type {
   WaitingTaskItem,
 } from "@/lib/mock/erp-data";
 import DishVisual from "@/components/DishVisual";
+import { WorkspaceSplash } from "@/components/shell/WorkspaceSplash";
+import { SovraLogo } from "@/components/ui/SovraLogo";
 
 const DashboardView = dynamic(
   () => import("@/components/dashboard/DashboardView"),
@@ -1346,11 +1348,7 @@ export function AlbarkaMaterial3ERP({
   }
 
   if (authChecking) {
-    return (
-      <div className="min-h-screen bg-md-surface flex items-center justify-center text-md-on-surface font-medium text-base">
-        Loading Material 3 ERP Workspace…
-      </div>
-    );
+    return <WorkspaceSplash />;
   }
 
   if (!currentUser) {
@@ -1460,9 +1458,7 @@ export function AlbarkaMaterial3ERP({
         <div className="space-y-4 overflow-y-auto">
           {/* Brand Row */}
           <div className="flex items-center gap-3 px-2 py-2">
-            <div className="w-10 h-10 rounded-xl bg-md-primary text-md-on-primary flex items-center justify-center font-bold text-lg shrink-0">
-              {ERP_BRAND_CONFIG.logoLetter}
-            </div>
+            <SovraLogo size={40} className="shrink-0" />
             <div className="hidden lg:block min-w-0">
               <div className="font-medium text-base text-md-on-surface truncate leading-tight">
                 {ERP_BRAND_CONFIG.productName}
@@ -1636,9 +1632,7 @@ export function AlbarkaMaterial3ERP({
             <div className="space-y-4 overflow-y-auto">
               <div className="flex items-center justify-between px-2">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-md-primary text-md-on-primary flex items-center justify-center font-bold">
-                    {ERP_BRAND_CONFIG.logoLetter}
-                  </div>
+                  <SovraLogo size={40} className="shrink-0" />
                   <span className="font-medium text-base">
                     {ERP_BRAND_CONFIG.productName}
                   </span>
@@ -3092,7 +3086,7 @@ export function AlbarkaMaterial3ERP({
                   <div className="p-3.5 rounded-xl bg-md-surface-container-low text-xs text-md-on-surface-variant space-y-1">
                     <div>{mongoConfig.lastStatus}</div>
                     <div className="text-[11px] opacity-80">
-                      Protected databases (such as <code className="font-mono">votix</code>) are blocked so Albarka ERP data stays in its own separate database (<code className="font-mono">albarka_erp</code>).
+                      Protected databases (such as <code className="font-mono">votix</code>) are blocked so Sovra ERP data stays in its own separate database (<code className="font-mono">albarka_erp</code>).
                     </div>
                   </div>
                   <form onSubmit={handleSaveMongoConfig} className="space-y-4">
