@@ -16,6 +16,7 @@ import {
   Flame,
   HelpCircle,
   ImageIcon,
+  Info,
   KeyRound,
   LayoutDashboard,
   LogOut,
@@ -91,6 +92,7 @@ import type {
 import DishVisual from "@/components/DishVisual";
 import { WorkspaceSplash } from "@/components/shell/WorkspaceSplash";
 import { SovraLogo } from "@/components/ui/SovraLogo";
+import { ERP_VERSION_TAG } from "@/lib/version";
 
 const DashboardView = dynamic(
   () => import("@/components/dashboard/DashboardView"),
@@ -98,6 +100,10 @@ const DashboardView = dynamic(
 );
 const InvoicesView = dynamic(
   () => import("@/components/invoices/InvoicesView"),
+  { ssr: false }
+);
+const AboutView = dynamic(
+  () => import("@/components/about/AboutView"),
   { ssr: false }
 );
 const CommandPalette = dynamic(
@@ -1423,6 +1429,8 @@ export function AlbarkaMaterial3ERP({
         return <Users {...props} />;
       case "BarChart3":
         return <BarChart3 {...props} />;
+      case "Info":
+        return <Info {...props} />;
       default:
         return <Settings {...props} />;
     }
@@ -1464,7 +1472,7 @@ export function AlbarkaMaterial3ERP({
                 {ERP_BRAND_CONFIG.productName}
               </div>
               <div className="text-xs text-md-on-surface-variant truncate">
-                {ERP_BRAND_CONFIG.workspaceSubtitle}
+                {ERP_BRAND_CONFIG.workspaceSubtitle} · {ERP_VERSION_TAG}
               </div>
             </div>
           </div>
@@ -1695,10 +1703,8 @@ export function AlbarkaMaterial3ERP({
 
             <Button
               variant="icon"
-              aria-label="Help and documentation"
-              onClick={() =>
-                notifySaved("Keyboard shortcut: Press Ctrl+K anytime to search")
-              }
+              aria-label="About Sovra ERP and shortcuts"
+              onClick={() => setActiveNav("about")}
             >
               <HelpCircle className="w-5 h-5" strokeWidth={1.8} />
             </Button>
@@ -3386,6 +3392,11 @@ export function AlbarkaMaterial3ERP({
               )}
             </div>
           )}
+
+          {/* =============================================================== */}
+          {/* ABOUT, VERSIONING & CREATOR SOCIALS                             */}
+          {/* =============================================================== */}
+          {activeNav === "about" && <AboutView />}
         </main>
       </div>
 

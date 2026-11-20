@@ -16,7 +16,8 @@ export type ERPNavKey =
   | "accounting"
   | "hr"
   | "reports"
-  | "settings";
+  | "settings"
+  | "about";
 
 export interface NavItemConfig {
   key: ERPNavKey;
@@ -32,7 +33,8 @@ export interface NavItemConfig {
     | "BookOpen"
     | "Users"
     | "BarChart3"
-    | "Settings";
+    | "Settings"
+    | "Info";
   permission: ERPPermission;
   badgeCount?: number;
   section: "PRIMARY" | "SYSTEM";
@@ -116,6 +118,14 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     label: "Settings",
     href: "/settings",
     iconName: "Settings",
+    permission: "inventory:view",
+    section: "SYSTEM",
+  },
+  {
+    key: "about",
+    label: "About",
+    href: "/about",
+    iconName: "Info",
     permission: "inventory:view",
     section: "SYSTEM",
   },
