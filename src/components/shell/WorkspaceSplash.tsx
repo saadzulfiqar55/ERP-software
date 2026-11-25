@@ -1,5 +1,5 @@
 import React from "react";
-import { SovraLogo } from "@/components/ui/SovraLogo";
+import { StackLyraLogo } from "@/components/ui/StackLyraLogo";
 import { ERP_VERSION_TAG } from "@/lib/version";
 
 export interface WorkspaceSplashProps {
@@ -13,7 +13,7 @@ export interface WorkspaceSplashProps {
  * while initial authentication state resolves.
  */
 export function WorkspaceSplash({
-  message = "Loading Sovra ERP Workspace…",
+  message = "Loading StackLyra ERP Workspace…",
 }: WorkspaceSplashProps) {
   return (
     <div
@@ -21,10 +21,10 @@ export function WorkspaceSplash({
       aria-live="polite"
       className="min-h-screen bg-md-surface flex flex-col items-center justify-center gap-4 px-6 text-md-on-surface"
     >
-      <SovraLogo size={56} className="drop-shadow-sm" />
+      <StackLyraLogo size={56} className="drop-shadow-sm" />
       <div className="text-center space-y-1">
         <div className="text-lg font-semibold tracking-tight text-md-on-surface flex items-center justify-center gap-2">
-          <span>Sovra ERP</span>
+          <span>StackLyra ERP</span>
           <span className="px-2 py-0.5 rounded-full bg-md-primary-container text-md-on-primary-container text-[11px] font-mono font-semibold">
             {ERP_VERSION_TAG}
           </span>

@@ -66,12 +66,22 @@ export const ERP_VERSION_POLICY = {
 
 export const ERP_RELEASES: ReleaseNoteItem[] = [
   {
-    version: ERP_VERSION_TAG,
+    version: "v0.5.1",
     stage: ERP_RELEASE_STAGE,
     summary:
-      "Sovra ERP identity refresh, Spark Crest branding, hardened Super Admin authentication, and modular system architecture.",
+      "Rebranded platform to StackLyra ERP with the squircle-enclosed Spark Crest identity.",
     highlights: [
-      "Rebranded workspace & metadata to Sovra ERP with custom Spark Crest SVG icon",
+      "Renamed workspace titles, shell branding, metadata, and docs to StackLyra ERP",
+      "Retained the squircle-enclosed S Spark Crest favicon and StackLyraLogo component",
+    ],
+  },
+  {
+    version: "v0.5.0",
+    stage: ERP_RELEASE_STAGE,
+    summary:
+      "Initial pre-production ERP identity refresh, Spark Crest branding, hardened Super Admin auth, and modular system architecture.",
+    highlights: [
+      "Rebranded workspace & metadata with custom squircle Spark Crest SVG icon",
       "Added shared pre-hydration splash (WorkspaceSplash + src/app/loading.tsx)",
       "Salted scrypt Super Admin auth, HS256 JWT single-session lock, and 13-permission RBAC",
       "Isolated MongoDB Atlas adapter (albarka_erp) with atomic transactional rollback",

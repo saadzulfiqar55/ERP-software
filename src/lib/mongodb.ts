@@ -77,7 +77,7 @@ export function resolveIsolatedDbName(requested?: string): string {
 
   if (PROTECTED_FOREIGN_DBS.has(candidate.toLowerCase())) {
     throw new Error(
-      `Database '${candidate}' is protected to keep Sovra ERP isolated from other cluster databases. Use '${DEFAULT_ISOLATED_DB_NAME}'.`
+      `Database '${candidate}' is protected to keep StackLyra ERP isolated from other cluster databases. Use '${DEFAULT_ISOLATED_DB_NAME}'.`
     );
   }
 

@@ -91,7 +91,7 @@ import type {
 } from "@/lib/mock/erp-data";
 import DishVisual from "@/components/DishVisual";
 import { WorkspaceSplash } from "@/components/shell/WorkspaceSplash";
-import { SovraLogo } from "@/components/ui/SovraLogo";
+import { StackLyraLogo } from "@/components/ui/StackLyraLogo";
 import { ERP_VERSION_TAG } from "@/lib/version";
 
 const DashboardView = dynamic(
@@ -1466,7 +1466,7 @@ export function AlbarkaMaterial3ERP({
         <div className="space-y-4 overflow-y-auto">
           {/* Brand Row */}
           <div className="flex items-center gap-3 px-2 py-2">
-            <SovraLogo size={40} className="shrink-0" />
+            <StackLyraLogo size={40} className="shrink-0" />
             <div className="hidden lg:block min-w-0">
               <div className="font-medium text-base text-md-on-surface truncate leading-tight">
                 {ERP_BRAND_CONFIG.productName}
@@ -1640,7 +1640,7 @@ export function AlbarkaMaterial3ERP({
             <div className="space-y-4 overflow-y-auto">
               <div className="flex items-center justify-between px-2">
                 <div className="flex items-center gap-3">
-                  <SovraLogo size={40} className="shrink-0" />
+                  <StackLyraLogo size={40} className="shrink-0" />
                   <span className="font-medium text-base">
                     {ERP_BRAND_CONFIG.productName}
                   </span>
@@ -1703,7 +1703,7 @@ export function AlbarkaMaterial3ERP({
 
             <Button
               variant="icon"
-              aria-label="About Sovra ERP and shortcuts"
+              aria-label="About StackLyra ERP and shortcuts"
               onClick={() => setActiveNav("about")}
             >
               <HelpCircle className="w-5 h-5" strokeWidth={1.8} />
@@ -3092,7 +3092,7 @@ export function AlbarkaMaterial3ERP({
                   <div className="p-3.5 rounded-xl bg-md-surface-container-low text-xs text-md-on-surface-variant space-y-1">
                     <div>{mongoConfig.lastStatus}</div>
                     <div className="text-[11px] opacity-80">
-                      Protected databases (such as <code className="font-mono">votix</code>) are blocked so Sovra ERP data stays in its own separate database (<code className="font-mono">albarka_erp</code>).
+                      Protected databases (such as <code className="font-mono">votix</code>) are blocked so StackLyra ERP data stays in its own separate database (<code className="font-mono">albarka_erp</code>).
                     </div>
                   </div>
                   <form onSubmit={handleSaveMongoConfig} className="space-y-4">

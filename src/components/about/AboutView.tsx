@@ -3,7 +3,7 @@
 import React from "react";
 import { ArrowUpRight, CheckCircle2, Code2, Layers, ShieldCheck } from "lucide-react";
 import { Card, PageHeader, StatusChip } from "@/components/ui/m3";
-import { SovraLogo } from "@/components/ui/SovraLogo";
+import { StackLyraLogo } from "@/components/ui/StackLyraLogo";
 import {
   ERP_AUTHOR,
   ERP_RELEASES,
@@ -55,14 +55,14 @@ const STACK_TAGS = [
 ];
 
 /**
- * Material Design 3 About view showcasing Sovra ERP version state,
+ * Material Design 3 About view showcasing StackLyra ERP version state,
  * release methodology, stack overview, and creator social links.
  */
 export default function AboutView() {
   return (
     <div className="space-y-6 max-w-5xl">
       <PageHeader
-        title="About Sovra ERP"
+        title="About StackLyra ERP"
         subtitle="Platform release status, engineering stack, and creator links"
         actions={
           <div className="flex items-center gap-2">
@@ -75,11 +75,11 @@ export default function AboutView() {
       {/* Brand Identity & Version Hero */}
       <Card className="p-6">
         <div className="flex flex-col sm:flex-row sm:items-center gap-5">
-          <SovraLogo size={64} className="shrink-0 drop-shadow-sm" />
+          <StackLyraLogo size={64} className="shrink-0 drop-shadow-sm" />
           <div className="space-y-2 min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2.5">
               <h2 className="text-xl font-semibold text-md-on-surface tracking-tight">
-                Sovra ERP &amp; POS Workspace
+                StackLyra ERP &amp; POS Workspace
               </h2>
               <span className="px-2.5 py-0.5 rounded-full bg-md-primary-container text-md-on-primary-container text-xs font-mono font-semibold">
                 {ERP_VERSION_TAG}

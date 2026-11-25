@@ -17,7 +17,7 @@ const robotoMono = Roboto_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sovra ERP — Material 3 Enterprise Resource Planning & POS",
+  title: "StackLyra ERP — Material 3 Enterprise Resource Planning & POS",
   description:
     "Google Material Design 3 (Material You) ERP, Invoicing, Khata Accounting, Inventory & PRA POS built with Next.js App Router, TypeScript & MongoDB.",
 };

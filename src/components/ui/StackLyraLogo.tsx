@@ -1,20 +1,20 @@
 import React, { useId } from "react";
 
-export interface SovraLogoProps {
+export interface StackLyraLogoProps {
   /** Pixel width and height of the square SVG mark. Defaults to 40. */
   size?: number;
   className?: string;
 }
 
 /**
- * Sovra ERP Spark Crest monogram ("S" crest with Material 3 slate-blue depth).
+ * StackLyra ERP Spark Crest monogram ("S" crest enclosed in a Material 3 squircle).
  * Safe to render in both Server and Client components; uses `useId()` to keep
  * SVG gradient IDs unique when multiple instances appear on screen.
  */
-export function SovraLogo({ size = 40, className }: SovraLogoProps) {
+export function StackLyraLogo({ size = 40, className }: StackLyraLogoProps) {
   const uid = useId().replace(/:/g, "");
-  const bgId = `sovra-crest-bg-${uid}`;
-  const rimId = `sovra-crest-rim-${uid}`;
+  const bgId = `stacklyra-crest-bg-${uid}`;
+  const rimId = `stacklyra-crest-rim-${uid}`;
 
   return (
     <svg
@@ -81,4 +81,4 @@ export function SovraLogo({ size = 40, className }: SovraLogoProps) {
   );
 }
 
-export default SovraLogo;
+export default StackLyraLogo;

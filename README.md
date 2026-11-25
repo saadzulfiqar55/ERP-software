@@ -1,4 +1,4 @@
-# Sovra ERP — Material Design 3 ERP, POS & Khata Accounting
+# StackLyra ERP — Material Design 3 ERP, POS & Khata Accounting
 
 A full-stack **Next.js 16 (App Router) + React 19 + TypeScript + Tailwind CSS v4 + MongoDB** Enterprise Resource Planning (ERP), Point of Sale (POS), Invoicing, Double-Entry Khata Accounting, and **Punjab Revenue Authority (PRA) e-IMS** workspace designed with **Google Material Design 3 (Material You)**.
 
@@ -13,7 +13,7 @@ A full-stack **Next.js 16 (App Router) + React 19 + TypeScript + Tailwind CSS v4
 | **Language** | TypeScript | `^5.7.2` | End-to-end static typing across domain models, API contracts, and UI components |
 | **Styling** | Tailwind CSS + `@tailwindcss/postcss` + PostCSS | `^4.3.5` / `^8.4.49` | `@theme`-mapped Material Design 3 CSS variables with Light & Dark (`[data-theme="dark"]`) support |
 | **Typography** | `next/font/google` (`Roboto`, `Roboto_Mono`) | Built-in Next.js | Self-hosted/optimized Material typography + `tabular-nums` monospace financial figures |
-| **Icons & Brand** | `lucide-react` + Custom SVG | `^0.468.0` | Consistent vector UI iconography and the custom **Spark Crest** (`S`) brand logo (`src/app/icon.svg`, `SovraLogo`) |
+| **Icons & Brand** | `lucide-react` + Custom SVG | `^0.468.0` | Consistent vector UI iconography and the custom **Spark Crest** (`S`) brand logo (`src/app/icon.svg`, `StackLyraLogo`) |
 | **Database** | `mongodb` (Official Node.js Driver) | `^7.9.0` | MongoDB Atlas / local MongoDB persistence (configured via `serverExternalPackages: ["mongodb"]` in `next.config.ts`) |
 | **Cryptography** | Node.js `node:crypto` | Built-in (`@types/node ^22.10.0`) | Zero-dependency `scrypt` salted password hashing, RFC 7519 `HS256` JWT signing/verification, `timingSafeEqual` comparisons |
 
@@ -27,7 +27,7 @@ src/
 ├── app/
 │   ├── layout.tsx                        # Root layout, Google fonts, metadata, anti-FOUC theme script
 │   ├── globals.css                       # Tailwind v4 @import + Material 3 Light/Dark CSS tokens
-│   ├── icon.svg                          # Sovra Spark Crest browser favicon
+│   ├── icon.svg                          # StackLyra Spark Crest browser favicon
 │   ├── loading.tsx                       # App Router Suspense pre-hydration fallback -> WorkspaceSplash
 │   ├── page.tsx                          # Home entry (defaults to dashboard)
 │   ├── dashboard/page.tsx                # Dashboard view route
@@ -59,7 +59,7 @@ src/
 │   ├── mongodb.ts                        # Isolated `albarka_erp` Mongo adapter, client pool cache, auto-indexing
 │   ├── tax-calculator.ts                 # Dynamic PRA GST & split-payment calculator
 │   ├── pra-client.ts                     # PRA e-IMS fiscal payload builder & deterministic QR URL generator
-│   ├── nav.ts                            # `ERP_BRAND_CONFIG` ("Sovra ERP") & RBAC-filtered navigation registry
+│   ├── nav.ts                            # `ERP_BRAND_CONFIG` ("StackLyra ERP") & RBAC-filtered navigation registry
 │   ├── format.ts                         # Currency/date formatting helpers
 │   ├── types.ts                          # Shared domain interfaces & union types
 │   ├── seed-data.ts                      # Initial Super Admin, demo staff, catalog, parties, ledger, & PRA config
@@ -73,7 +73,7 @@ src/
     ├── shell/AlbarkaMaterial3ERP.tsx     # Main multi-module ERP shell (POS, Sales, Inventory, Ledger, HR, Settings)
     ├── shell/CommandPalette.tsx          # Global `Ctrl+K` / `Cmd+K` search across nav, products, orders & parties
     ├── shell/WorkspaceSplash.tsx         # Shared pre-hydration & session-check splash screen
-    └── ui/                               # Material Design 3 primitives (`m3.tsx`, `SovraLogo.tsx`, `ThemeToggle.tsx`, etc.)
+    └── ui/                               # Material Design 3 primitives (`m3.tsx`, `StackLyraLogo.tsx`, `ThemeToggle.tsx`, etc.)
 ```
 
 ---
@@ -153,7 +153,7 @@ All UI colors and elevations bind to CSS custom properties mapped into Tailwind 
 | **Surface Hierarchy** | `--md-surface`, `-low`, `-lowest`, `-high` | `bg-md-surface*` | App canvas (`#F8F9FF`), `264px` nav drawer, flat `16px`-radius cards |
 | **Semantic Containers** | `--md-success-container`, `--md-warning-container`, `--md-error-container` | `bg-md-*-container` | Status chips, stock progress thresholds, alerts |
 
-Key reusable primitives in `src/components/ui/`: `Button`, `ExtendedFab`, `NavItem`, `SearchBar`, `Card`, `StatCard`, `StatusChip`, `FilterChip`, `SegmentedButton`, `OutlinedTextField`, `Switch`, `ProgressBar`, `SovraLogo`, and `ThemeToggle`.
+Key reusable primitives in `src/components/ui/`: `Button`, `ExtendedFab`, `NavItem`, `SearchBar`, `Card`, `StatCard`, `StatusChip`, `FilterChip`, `SegmentedButton`, `OutlinedTextField`, `Switch`, `ProgressBar`, `StackLyraLogo`, and `ThemeToggle`.
 
 ---
 

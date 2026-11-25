@@ -1,7 +1,7 @@
 import { ERPPermission } from "./types";
 
 export const ERP_BRAND_CONFIG = {
-  productName: "Sovra ERP",
+  productName: "StackLyra ERP",
   workspaceSubtitle: "Enterprise & POS Workspace",
   logoLetter: "S",
 };
