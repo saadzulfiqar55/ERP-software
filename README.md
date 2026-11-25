@@ -102,11 +102,12 @@ Authorization is enforced server-side via `assertActorPermission(db, permission)
 | **`MANAGER`** | `2` | `pos:sale:create`, `pos:discount:override`, `inventory:view`, `inventory:adjust` |
 | **`CASHIER`** | `1` | `pos:sale:create`, `inventory:view` |
 
-### Dual Persistence & Isolated MongoDB Adapter
+### Dual Persistence, Crash-Safe Storage & Isolated MongoDB Adapter (`v0.6.0`)
 - **Authoritative Cloud Store (`src/lib/mongodb.ts`):** Uses a global singleton `MongoClient` pool (`__albarkaMongoClients`) to persist state across **12 collections** (`users`, `products`, `orders`, `invoices`, `parties`, `ledger_entries`, `system_settings`, `active_sessions`, `session_audit_logs`, `immutable_audit_logs`, `cashier_shifts`, `fiscal_periods`).
+- **Crash-Safe Non-Destructive Mongo Sync:** Commits the single-document `albarka_master_snapshot` atomically first and uses `bulkWrite` upserts + post-upsert stale pruning instead of wiping collections before inserts.
 - **Database Isolation:** Defaults to `albarka_erp` and explicitly rejects protected cluster databases (`votix`, `admin`, `local`, `config`) via `resolveIsolatedDbName()`.
-- **Auto-Indexing & Selective Sync:** Creates lookup indexes once per database (`users.username`, `users.email`, `products.code + isArchived`, `orders.createdAt`, `invoices.status + dueDate`, `ledger_entries.partyId + createdAt`) and supports partial collection writes (`MongoSyncSection[]`).
-- **Resilient JSON Fallback (`src/lib/db.ts`):** When MongoDB is disabled or unreachable, state seamlessly reads from and writes to `data/albarka-db.json` locally (or `/tmp/albarka-data/albarka-db.json` on read-only serverless hosts like Vercel).
+- **Crash-Safe Atomic Local JSON (`src/lib/db.ts`):** Uses temp-file writes (`albarka-db.json.tmp.*`) + `fsyncSync` + `.bak` backup + atomic `renameSync`, automatically recovering from `albarka-db.json.bak` if sudden power loss corrupts the primary file, plus a 15-second warm in-memory snapshot cache.
+- **Client Crash Recovery & Write-Ahead Outbox (`src/lib/crash-safe-store.ts`):** Dual-writes active POS carts, invoice drafts, workspace cache, and outbox mutations (POS orders, invoices, menu, stock, tables/servers) to **IndexedDB** (`stacklyra_crash_safe_db`) and `localStorage`, recovering unfinished orders automatically after sudden power-offs and replaying unconfirmed sales idempotently when connectivity returns.
 
 ### Transactional Safety, Precision & Performance
 - **Atomic Rollback Wrapper (`withTransaction` in `src/core/db/index.ts`):** Clones the database snapshot before executing domain logic; any validation failure, stock shortage, unbalanced journal, or locked period aborts the entire mutation cleanly before disk/MongoDB commit.

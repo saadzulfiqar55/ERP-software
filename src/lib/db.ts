@@ -76,6 +76,7 @@ const DB_DIR = IS_SERVERLESS
   ? path.join("/tmp", "albarka-data")
   : path.join(process.cwd(), "data");
 const DB_FILE = path.join(DB_DIR, "albarka-db.json");
+const DB_BACKUP_FILE = path.join(DB_DIR, "albarka-db.json.bak");
 const ENV_LOCAL_FILE = path.join(process.cwd(), ".env.local");
 
 function readDotEnvLocalValue(key: string): string | undefined {
@@ -238,20 +239,95 @@ function mergeWithDefaults(
   };
 }
 
+function cleanupOrphanedTmpFiles(): void {
+  try {
+    if (!fs.existsSync(DB_DIR)) return;
+    for (const entry of fs.readdirSync(DB_DIR)) {
+      if (entry.startsWith("albarka-db.json.tmp.")) {
+        try {
+          fs.unlinkSync(path.join(DB_DIR, entry));
+        } catch {
+          // Best-effort temp cleanup
+        }
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+/**
+ * Crash-safe atomic disk writer:
+ * 1. Serializes full JSON to a temp file and calls `fsyncSync` to flush OS buffers.
+ * 2. Preserves the last known-good snapshot in `.bak`.
+ * 3. Atomically renames the temp file into `albarka-db.json`.
+ */
+function writeJsonAtomic(filePath: string, payload: DatabaseSchema): void {
+  if (!fs.existsSync(DB_DIR)) {
+    fs.mkdirSync(DB_DIR, { recursive: true });
+  }
+  const serialized = JSON.stringify(payload, null, 2);
+  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+  const fd = fs.openSync(tmpPath, "w");
+  try {
+    fs.writeSync(fd, serialized, 0, "utf-8");
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  if (fs.existsSync(filePath)) {
+    try {
+      const existingRaw = fs.readFileSync(filePath, "utf-8");
+      JSON.parse(existingRaw); // Only back up valid JSON
+      fs.copyFileSync(filePath, DB_BACKUP_FILE);
+    } catch {
+      // Existing file is corrupt/incomplete; preserve previous good .bak untouched
+    }
+  }
+
+  fs.renameSync(tmpPath, filePath);
+}
+
 export function readDb(): DatabaseSchema {
   const defaults = buildDefaults();
+  cleanupOrphanedTmpFiles();
 
   try {
     if (!fs.existsSync(DB_DIR)) {
       fs.mkdirSync(DB_DIR, { recursive: true });
     }
     if (!fs.existsSync(DB_FILE)) {
-      fs.writeFileSync(DB_FILE, JSON.stringify(defaults, null, 2), "utf-8");
+      if (fs.existsSync(DB_BACKUP_FILE)) {
+        try {
+          const bakRaw = fs.readFileSync(DB_BACKUP_FILE, "utf-8");
+          const bakParsed = JSON.parse(bakRaw) as Partial<DatabaseSchema>;
+          const recovered = mergeWithDefaults(bakParsed, getEnvMongoConfig());
+          writeJsonAtomic(DB_FILE, recovered);
+          return recovered;
+        } catch {
+          // Backup unreadable; seed defaults
+        }
+      }
+      writeJsonAtomic(DB_FILE, defaults);
       return defaults;
     }
-    const raw = fs.readFileSync(DB_FILE, "utf-8");
-    const parsed = JSON.parse(raw) as Partial<DatabaseSchema>;
-    return mergeWithDefaults(parsed, getEnvMongoConfig());
+
+    try {
+      const raw = fs.readFileSync(DB_FILE, "utf-8");
+      const parsed = JSON.parse(raw) as Partial<DatabaseSchema>;
+      return mergeWithDefaults(parsed, getEnvMongoConfig());
+    } catch {
+      // Primary JSON corrupted by sudden power loss -> recover transparently from `.bak`
+      if (fs.existsSync(DB_BACKUP_FILE)) {
+        const bakRaw = fs.readFileSync(DB_BACKUP_FILE, "utf-8");
+        const bakParsed = JSON.parse(bakRaw) as Partial<DatabaseSchema>;
+        const recovered = mergeWithDefaults(bakParsed, getEnvMongoConfig());
+        writeJsonAtomic(DB_FILE, recovered);
+        return recovered;
+      }
+      return defaults;
+    }
   } catch {
     return defaults;
   }
@@ -259,10 +335,7 @@ export function readDb(): DatabaseSchema {
 
 export function writeDb(data: DatabaseSchema): void {
   try {
-    if (!fs.existsSync(DB_DIR)) {
-      fs.mkdirSync(DB_DIR, { recursive: true });
-    }
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+    writeJsonAtomic(DB_FILE, data);
   } catch {
     // Serverless environments with read-only filesystems rely on MongoDB Atlas persistence
   }

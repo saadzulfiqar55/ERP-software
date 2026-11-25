@@ -240,21 +240,64 @@ export async function pingMongoConnection(
   }
 }
 
-async function replaceCollectionDocs<T extends { id?: string }>(
+/**
+ * Non-destructive crash-safe collection sync:
+ * Upserts active documents first via `bulkWrite` and prunes stale documents
+ * only AFTER upserts succeed, preventing empty-collection data loss if a crash
+ * or network drop occurs mid-sync.
+ */
+async function replaceCollectionDocs<
+  T extends { id?: string; key?: string; periodKey?: string }
+>(
   db: ReturnType<MongoClient["db"]>,
   collectionName: string,
   docs: T[]
 ): Promise<void> {
   const collection = db.collection(collectionName);
-  await collection.deleteMany({});
-  if (docs.length > 0) {
-    await collection.insertMany(
-      docs.map((doc) => ({
-        ...doc,
-        _syncedAt: new Date().toISOString(),
-      }))
-    );
+  const now = new Date().toISOString();
+
+  if (docs.length === 0) {
+    await collection.deleteMany({});
+    return;
   }
+
+  const getKeyField = (doc: T): { field: "id" | "key" | "periodKey"; value: string } | null => {
+    if (doc.id) return { field: "id", value: doc.id };
+    if (doc.key) return { field: "key", value: doc.key };
+    if (doc.periodKey) return { field: "periodKey", value: doc.periodKey };
+    return null;
+  };
+
+  const keyedPairs = docs
+    .map((doc) => ({ doc, keyInfo: getKeyField(doc) }))
+    .filter(
+      (x): x is { doc: T; keyInfo: { field: "id" | "key" | "periodKey"; value: string } } =>
+        Boolean(x.keyInfo)
+    );
+
+  if (keyedPairs.length === docs.length) {
+    const keyField = keyedPairs[0].keyInfo.field;
+    const ops = keyedPairs.map(({ doc, keyInfo }) => ({
+      updateOne: {
+        filter: { [keyInfo.field]: keyInfo.value },
+        update: { $set: { ...doc, _syncedAt: now } },
+        upsert: true,
+      },
+    }));
+    await collection.bulkWrite(ops, { ordered: false });
+
+    const activeIds = keyedPairs.map((p) => p.keyInfo.value);
+    await collection.deleteMany({ [keyField]: { $nin: activeIds } });
+    return;
+  }
+
+  await collection.deleteMany({});
+  await collection.insertMany(
+    docs.map((doc) => ({
+      ...doc,
+      _syncedAt: now,
+    }))
+  );
 }
 
 export async function syncSnapshotToMongoIfAvailable(
@@ -288,22 +331,23 @@ export async function syncSnapshotToMongoIfAvailable(
     const shouldSync = (section: MongoSyncSection) =>
       !syncSet || syncSet.has(section);
 
-    const ops: Array<Promise<unknown>> = [
-      db
-        .collection<{ _id: string } & Record<string, unknown>>(
-          MONGODB_COLLECTIONS.SETTINGS
-        )
-        .updateOne(
-          { _id: "albarka_master_snapshot" },
-          {
-            $set: {
-              ...sanitizedSnapshot,
-              updatedAt: new Date().toISOString(),
-            },
+    // 1. Commit single-document atomic master snapshot FIRST for crash recovery
+    await db
+      .collection<{ _id: string } & Record<string, unknown>>(
+        MONGODB_COLLECTIONS.SETTINGS
+      )
+      .updateOne(
+        { _id: "albarka_master_snapshot" },
+        {
+          $set: {
+            ...sanitizedSnapshot,
+            updatedAt: new Date().toISOString(),
           },
-          { upsert: true }
-        ),
-    ];
+        },
+        { upsert: true }
+      );
+
+    const ops: Array<Promise<unknown>> = [];
 
     if (shouldSync("USERS")) {
       ops.push(

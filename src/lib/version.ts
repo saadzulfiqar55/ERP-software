@@ -66,6 +66,18 @@ export const ERP_VERSION_POLICY = {
 
 export const ERP_RELEASES: ReleaseNoteItem[] = [
   {
+    version: "v0.6.0",
+    stage: ERP_RELEASE_STAGE,
+    summary:
+      "Crash-safe durability milestone: zero-data-loss persistence across sudden system crashes, power turnoffs, and network drops.",
+    highlights: [
+      "Server atomic write-temp + fsyncSync + .bak auto-recovery preventing truncated JSON on power loss",
+      "Non-destructive MongoDB bulkWrite upserts + atomic snapshot commit before pruning stale docs",
+      "IndexedDB + localStorage dual write-ahead outbox for POS checkouts, invoices, menu, and stock",
+      "Automatic active POS cart & invoice draft recovery across sudden browser kills or PC restarts",
+    ],
+  },
+  {
     version: "v0.5.3",
     stage: ERP_RELEASE_STAGE,
     summary:

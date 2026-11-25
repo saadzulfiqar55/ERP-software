@@ -1,6 +1,15 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  clearDurableSnapshot,
+  INVOICE_DRAFT_KEY,
+  readSyncJson,
+  SYNC_QUEUE_KEY,
+  QueuedMutation,
+  writeDurableOutbox,
+  writeDurableSnapshot,
+} from "@/lib/crash-safe-store";
 import {
   ArrowLeft,
   Download,
@@ -88,24 +97,43 @@ export default function InvoicesView({
       if (data.erpInvoices) {
         setInvoices(data.erpInvoices);
       }
+      if (payload.action === "CREATE") {
+        clearDurableSnapshot(INVOICE_DRAFT_KEY);
+      }
       onShowSnackbar(successMsg);
       return true;
     } catch {
-      onShowSnackbar("Network error syncing invoice update.");
-      return false;
+      const existingQueue = readSyncJson<QueuedMutation[]>(SYNC_QUEUE_KEY) || [];
+      writeDurableOutbox([
+        ...existingQueue,
+        {
+          id: `q-inv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          url: "/api/invoices",
+          method: "POST",
+          payload,
+          createdAt: new Date().toISOString(),
+          label: `Invoice ${String(payload.action || "UPDATE")}`,
+        },
+      ]);
+      if (payload.action === "CREATE" && payload.invoice) {
+        setInvoices((prev) => [payload.invoice as ERPInvoice, ...prev]);
+        clearDurableSnapshot(INVOICE_DRAFT_KEY);
+      }
+      onShowSnackbar("Offline — invoice saved locally & queued for cloud sync.");
+      return true;
     }
   }
   const [page, setPage] = useState<number>(1);
   const rowsPerPage = 10;
 
-  // New Invoice Form State (Section 5.3)
+  // New Invoice Form State (Clean defaults + crash-safe draft recovery)
   const [customerName, setCustomerName] = useState<string>(
-    parties[0]?.name || "Chaudhry Textile Mills"
+    parties[0]?.name || ""
   );
-  const [billingEmail, setBillingEmail] = useState<string>(
-    "accounts@chaudhrytextiles.pk"
+  const [billingEmail, setBillingEmail] = useState<string>("");
+  const [issueDate, setIssueDate] = useState<string>(
+    new Date().toISOString().slice(0, 10)
   );
-  const [issueDate, setIssueDate] = useState<string>("2026-11-17");
   const [paymentTerms, setPaymentTerms] = useState<
     "NET_30" | "NET_15" | "DUE_ON_RECEIPT"
   >("NET_30");
@@ -130,19 +158,47 @@ export default function InvoicesView({
   const [lineItems, setLineItems] = useState<ERPInvoiceLineItem[]>([
     {
       id: "new-li-1",
-      description: "Albarka Special Mutton Karahi (Full 1 Kg)",
-      quantity: 4,
-      unitPriceMinor: 380000, // PKR 3,800
-      taxPercent: 16,
-    },
-    {
-      id: "new-li-2",
-      description: "Desi Ghee Habshi Halwa 1Kg Gift Box",
-      quantity: 5,
-      unitPriceMinor: 185000, // PKR 1,850
+      description: "",
+      quantity: 1,
+      unitPriceMinor: 0,
       taxPercent: 16,
     },
   ]);
+
+  // Restore any unfinished invoice draft after a crash / turnoff
+  useEffect(() => {
+    if (viewMode !== "NEW") return;
+    const saved = readSyncJson<{
+      customerName?: string;
+      billingEmail?: string;
+      issueDate?: string;
+      lineItems?: ERPInvoiceLineItem[];
+    }>(INVOICE_DRAFT_KEY);
+    if (saved && saved.lineItems && saved.lineItems.some((l) => l.description.trim())) {
+      if (saved.customerName) setCustomerName(saved.customerName);
+      if (saved.billingEmail) setBillingEmail(saved.billingEmail);
+      if (saved.issueDate) setIssueDate(saved.issueDate);
+      setLineItems(saved.lineItems);
+    }
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== "NEW") return;
+    const hasContent =
+      Boolean(customerName.trim()) ||
+      lineItems.some((l) => l.description.trim() || l.unitPriceMinor > 0);
+    if (!hasContent) {
+      clearDurableSnapshot(INVOICE_DRAFT_KEY);
+      return;
+    }
+    writeDurableSnapshot(INVOICE_DRAFT_KEY, {
+      customerName,
+      billingEmail,
+      issueDate,
+      lineItems,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [viewMode, customerName, billingEmail, issueDate, lineItems]);
 
   // Summary Tile Totals (in minor units)
   const summaryStats = useMemo(() => {

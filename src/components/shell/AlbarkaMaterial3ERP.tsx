@@ -94,6 +94,18 @@ import DishVisual from "@/components/DishVisual";
 import { WorkspaceSplash } from "@/components/shell/WorkspaceSplash";
 import { StackLyraLogo } from "@/components/ui/StackLyraLogo";
 import { ERP_VERSION_TAG } from "@/lib/version";
+import {
+  clearDurableSnapshot,
+  POS_DRAFT_KEY,
+  PosDraftSnapshot,
+  QueuedMutation,
+  readDurableOutboxAsync,
+  readDurableSnapshotAsync,
+  readSyncJson,
+  WORKSPACE_CACHE_KEY,
+  writeDurableOutbox,
+  writeDurableSnapshot,
+} from "@/lib/crash-safe-store";
 
 const DashboardView = dynamic(
   () => import("@/components/dashboard/DashboardView"),
@@ -132,17 +144,6 @@ const EMPTY_PRA_CONFIG: PRAConfig = {
   serviceChargePercent: 5,
   praLiveMode: false,
 };
-
-const WORKSPACE_CACHE_KEY = "stacklyra_workspace_cache_v1";
-const SYNC_QUEUE_KEY = "stacklyra_sync_queue_v1";
-
-interface QueuedMutation {
-  id: string;
-  url: string;
-  method: "POST" | "PUT";
-  payload: Record<string, unknown>;
-  createdAt: string;
-}
 
 const QUICK_CHEF_NOTES = [
   "Desi Ghee",
@@ -335,26 +336,51 @@ export function AlbarkaMaterial3ERP({
   }, []);
 
   function saveWorkspaceCache(partial: Record<string, unknown>) {
-    try {
-      const raw = localStorage.getItem(WORKSPACE_CACHE_KEY);
-      const prev = raw ? JSON.parse(raw) : {};
-      localStorage.setItem(
-        WORKSPACE_CACHE_KEY,
-        JSON.stringify({ ...prev, ...partial })
-      );
-    } catch {
-      // Ignore storage quota errors
-    }
+    const prev = readSyncJson<Record<string, unknown>>(WORKSPACE_CACHE_KEY) || {};
+    writeDurableSnapshot(WORKSPACE_CACHE_KEY, { ...prev, ...partial });
   }
 
   function persistSyncQueue(next: QueuedMutation[]) {
     setSyncQueue(next);
-    try {
-      localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(next));
-    } catch {
-      // Ignore storage quota errors
-    }
+    writeDurableOutbox(next);
   }
+
+  // Continuously checkpoint active POS order to IndexedDB + localStorage so crashes/turnoffs never lose in-progress carts
+  useEffect(() => {
+    if (authChecking) return;
+    if (cart.length === 0 && !customerName && !customerPhone && discountAmount === 0) {
+      clearDurableSnapshot(POS_DRAFT_KEY);
+      return;
+    }
+    const draft: PosDraftSnapshot = {
+      cart,
+      orderType,
+      tableNumber,
+      waiterName,
+      customerName,
+      customerPhone,
+      selectedKhataId,
+      discountAmount,
+      paymentMethod,
+      splitCashRatio,
+      cashTendered,
+      updatedAt: new Date().toISOString(),
+    };
+    writeDurableSnapshot(POS_DRAFT_KEY, draft);
+  }, [
+    authChecking,
+    cart,
+    orderType,
+    tableNumber,
+    waiterName,
+    customerName,
+    customerPhone,
+    selectedKhataId,
+    discountAmount,
+    paymentMethod,
+    splitCashRatio,
+    cashTendered,
+  ]);
 
   async function flushSyncQueue(overrideQueue?: QueuedMutation[]) {
     const queueToRun = overrideQueue ?? syncQueue;
@@ -476,35 +502,75 @@ export function AlbarkaMaterial3ERP({
     });
   }
 
-  // Hydrate instant local cache, monitor connectivity, and verify JWT session on mount
+  // Hydrate instant local cache, restore crash-recovered POS drafts & outbox, monitor connectivity, and verify JWT session on mount
   useEffect(() => {
+    let restoredCartCount = 0;
     try {
-      const cachedRaw = localStorage.getItem(WORKSPACE_CACHE_KEY);
-      if (cachedRaw) {
-        const c = JSON.parse(cachedRaw);
-        if (c.praConfig) setPraConfig(c.praConfig);
-        if (Array.isArray(c.products)) setProducts(c.products);
-        if (Array.isArray(c.orders)) setOrders(c.orders);
-        if (Array.isArray(c.erpInvoices)) setErpInvoices(c.erpInvoices);
-        if (Array.isArray(c.waitingTasks)) setWaitingTasks(c.waitingTasks);
-        if (Array.isArray(c.stockMonitor)) setStockMonitor(c.stockMonitor);
+      const c = readSyncJson<Record<string, unknown>>(WORKSPACE_CACHE_KEY);
+      if (c) {
+        if (c.praConfig) setPraConfig(c.praConfig as PRAConfig);
+        if (Array.isArray(c.products)) setProducts(c.products as Product[]);
+        if (Array.isArray(c.orders)) setOrders(c.orders as Order[]);
+        if (Array.isArray(c.erpInvoices)) setErpInvoices(c.erpInvoices as ERPInvoice[]);
+        if (Array.isArray(c.waitingTasks)) setWaitingTasks(c.waitingTasks as WaitingTaskItem[]);
+        if (Array.isArray(c.stockMonitor)) setStockMonitor(c.stockMonitor as StockLevelMonitorItem[]);
         if (Array.isArray(c.restaurantTables)) {
-          setRestaurantTables(c.restaurantTables);
-          setTableNumber((prev) => prev || c.restaurantTables[0] || "");
+          const cachedTables = c.restaurantTables as string[];
+          setRestaurantTables(cachedTables);
+          setTableNumber((prev) => prev || cachedTables[0] || "");
         }
         if (Array.isArray(c.servers)) {
-          setServers(c.servers);
-          setWaiterName((prev) => prev || c.servers[0] || "");
+          const cachedServers = c.servers as string[];
+          setServers(cachedServers);
+          setWaiterName((prev) => prev || cachedServers[0] || "");
         }
       }
-      const qRaw = localStorage.getItem(SYNC_QUEUE_KEY);
-      if (qRaw) {
-        const parsedQueue = JSON.parse(qRaw) as QueuedMutation[];
-        if (Array.isArray(parsedQueue)) setSyncQueue(parsedQueue);
+
+      const draft = readSyncJson<PosDraftSnapshot>(POS_DRAFT_KEY);
+      if (draft && Array.isArray(draft.cart) && draft.cart.length > 0) {
+        setCart(draft.cart);
+        if (draft.orderType) setOrderType(draft.orderType);
+        if (draft.tableNumber) setTableNumber(draft.tableNumber);
+        if (draft.waiterName) setWaiterName(draft.waiterName);
+        if (draft.customerName) setCustomerName(draft.customerName);
+        if (draft.customerPhone) setCustomerPhone(draft.customerPhone);
+        if (draft.selectedKhataId) setSelectedKhataId(draft.selectedKhataId);
+        if (typeof draft.discountAmount === "number") setDiscountAmount(draft.discountAmount);
+        if (draft.paymentMethod) setPaymentMethod(draft.paymentMethod);
+        if (typeof draft.splitCashRatio === "number") setSplitCashRatio(draft.splitCashRatio);
+        if (draft.cashTendered) setCashTendered(draft.cashTendered);
+        restoredCartCount = draft.cart.length;
       }
     } catch {
       // Ignore corrupt cache
     }
+
+    if (restoredCartCount > 0) {
+      notifySaved(
+        `Recovered unfinished POS order (${restoredCartCount} item${restoredCartCount > 1 ? "s" : ""}) from previous session.`
+      );
+    }
+
+    // Reconcile IndexedDB durable store (fallback when localStorage was pruned)
+    void (async () => {
+      const durableOutbox = await readDurableOutboxAsync();
+      if (durableOutbox.length > 0) {
+        setSyncQueue(durableOutbox);
+        if (typeof navigator === "undefined" || navigator.onLine) {
+          void flushSyncQueue(durableOutbox);
+        }
+      }
+      if (restoredCartCount === 0) {
+        const idbDraft = await readDurableSnapshotAsync<PosDraftSnapshot>(POS_DRAFT_KEY);
+        if (idbDraft && Array.isArray(idbDraft.cart) && idbDraft.cart.length > 0) {
+          setCart(idbDraft.cart);
+          if (idbDraft.orderType) setOrderType(idbDraft.orderType);
+          if (idbDraft.tableNumber) setTableNumber(idbDraft.tableNumber);
+          if (idbDraft.waiterName) setWaiterName(idbDraft.waiterName);
+          notifySaved(`Recovered unfinished POS order (${idbDraft.cart.length} items).`);
+        }
+      }
+    })();
 
     if (typeof navigator !== "undefined") {
       setIsOnline(navigator.onLine);
@@ -882,7 +948,62 @@ export function AlbarkaMaterial3ERP({
       cashierName: `${currentUser?.name} (${currentUser?.role})`,
     };
 
+    // Write-ahead outbox record BEFORE network dispatch so crashes/power-loss mid-checkout never lose the sale
+    const outboxId = `q-ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const outboxEntry: QueuedMutation = {
+      id: outboxId,
+      url: "/api/orders",
+      method: "POST",
+      payload,
+      createdAt: new Date().toISOString(),
+      label: `POS Checkout (PKR ${grandTotal.toLocaleString()})`,
+    };
+    const queueWithSale = [...syncQueue, outboxEntry];
+    persistSyncQueue(queueWithSale);
+
+    const completeOfflineSale = () => {
+      const localOrder: Order = {
+        id: `ord-offline-${Date.now()}`,
+        idempotencyKey: payload.idempotencyKey,
+        invoiceNumber: `OFF-${Date.now().toString().slice(-6)}`,
+        usin: `OFF-${Date.now().toString().slice(-6)}`,
+        praInvoiceNumber: "OFFLINE-PENDING-PRA",
+        praQrPayload: "",
+        praSyncStatus: "PENDING_OFFLINE",
+        createdAt: new Date().toISOString(),
+        orderType,
+        tableNumber: payload.tableNumber,
+        waiterName: payload.waiterName,
+        customerName: payload.customerName,
+        customerPhone: payload.customerPhone,
+        buyerNtnCnic: payload.buyerNtnCnic,
+        khataAccountId: payload.khataAccountId,
+        items: cart,
+        discountAmount: payload.discountAmount,
+        serviceCharge: payload.serviceCharge,
+        paymentMethod,
+        cashPaid,
+        cardPaid,
+        changeReturned,
+        taxBreakdown: liveTaxBreakdown,
+        cashierName: payload.cashierName,
+      };
+      const nextOrders = [localOrder, ...orders];
+      setOrders(nextOrders);
+      saveWorkspaceCache({ orders: nextOrders });
+      setActiveReceiptOrder(localOrder);
+      setCart([]);
+      setDiscountAmount(0);
+      setCashTendered("");
+      clearDurableSnapshot(POS_DRAFT_KEY);
+      notifySaved("Sale saved locally — queued in outbox for cloud & PRA sync.");
+    };
+
     try {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        completeOfflineSale();
+        return;
+      }
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -890,10 +1011,12 @@ export function AlbarkaMaterial3ERP({
       });
       const data = await res.json();
       if (res.ok) {
+        persistSyncQueue(syncQueue.filter((q) => q.id !== outboxId));
         setOrders(data.db.orders);
         setProducts(data.db.products);
         setParties(data.db.parties);
         setLedger(data.db.ledger);
+        saveWorkspaceCache({ orders: data.db.orders, products: data.db.products });
         if (data.db.immutableAuditLogs)
           setImmutableAuditLogs(data.db.immutableAuditLogs);
         if (data.db.cashierShifts) setCashierShifts(data.db.cashierShifts);
@@ -901,9 +1024,14 @@ export function AlbarkaMaterial3ERP({
         setCart([]);
         setDiscountAmount(0);
         setCashTendered("");
+        clearDurableSnapshot(POS_DRAFT_KEY);
       } else {
+        // Explicit server/domain rejection (stock, locked fiscal period, auth): remove stale outbox entry
+        persistSyncQueue(syncQueue.filter((q) => q.id !== outboxId));
         notifySaved(data.error || "Order rejected by domain guard.");
       }
+    } catch {
+      completeOfflineSale();
     } finally {
       setSubmittingOrder(false);
     }
