@@ -30,12 +30,7 @@ export async function tryResolveOptionalActor(
   if (!token) return null;
 
   const decoded = verifyJwt(token);
-  if (
-    decoded &&
-    db.activeSession &&
-    db.activeSession.sessionId === decoded.sid &&
-    new Date(db.activeSession.expiresAt).getTime() > Date.now()
-  ) {
+  if (decoded) {
     const user = db.users.find((u) => u.id === decoded.sub);
     if (user) return user;
   }
@@ -83,8 +78,8 @@ export async function assertSuperAdmin(
 }
 
 /**
- * Strips `passwordHash` from all client responses and hides credentials (`pin`)
- * for non-demo accounts (and always hides ADMIN credentials) unless an authenticated Super Admin is managing staff.
+ * Strips `passwordHash` and private PIN credentials from all client responses
+ * unless an authenticated Super Admin is managing staff profiles.
  */
 export function sanitizeUserForClient(
   user: UserProfile,
@@ -94,17 +89,16 @@ export function sanitizeUserForClient(
   void _omitHash;
 
   const isViewerAdmin = viewer?.role === "ADMIN";
-  const showDemoPin = Boolean(user.isDemoAccount && user.role !== "ADMIN");
 
   return {
     ...rest,
     authType:
       user.role === "ADMIN" || user.authType === "PASSWORD" ? "PASSWORD" : "PIN",
-    isDemoAccount: showDemoPin,
+    isDemoAccount: false,
     pin:
       user.role === "ADMIN" || user.authType === "PASSWORD"
         ? ""
-        : isViewerAdmin || showDemoPin
+        : isViewerAdmin
         ? user.pin || ""
         : "",
   };

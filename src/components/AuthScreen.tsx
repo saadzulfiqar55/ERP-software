@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { ActiveSession, SessionAuditLog, UserProfile } from "@/lib/types";
 import {
-  AlertTriangle,
   Eye,
   EyeOff,
   KeyRound,
@@ -34,7 +33,6 @@ interface AuthScreenProps {
 
 export default function AuthScreen({
   users,
-  activeSession,
   onAuthSuccess,
 }: AuthScreenProps) {
   const staffProfiles = users.filter(
@@ -54,22 +52,13 @@ export default function AuthScreen({
   const [usernameInput, setUsernameInput] = useState<string>("");
   const [passwordInput, setPasswordInput] = useState<string>("");
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [forceTakeover, setForceTakeover] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
-  const [conflictSession, setConflictSession] = useState<ActiveSession | null>(
-    activeSession
-  );
   const [loading, setLoading] = useState<boolean>(false);
-
-  useEffect(() => {
-    setConflictSession(activeSession);
-  }, [activeSession]);
 
   async function submitLogin(
     payload:
       | { userId: string; pin: string }
-      | { username: string; password: string },
-    takeover: boolean
+      | { username: string; password: string }
   ) {
     setLoading(true);
     setError("");
@@ -80,18 +69,10 @@ export default function AuthScreen({
         body: JSON.stringify({
           action: "LOGIN",
           ...payload,
-          forceTakeover: takeover,
         }),
       });
 
       const data = await res.json();
-      if (res.status === 409 && data.conflictSession) {
-        setConflictSession(data.conflictSession);
-        setForceTakeover(true);
-        setError(data.error);
-        return;
-      }
-
       if (!res.ok) {
         setError(data.error || "Sign-in failed");
         if (authMode === "STAFF_PIN") setPinInput("");
@@ -113,15 +94,12 @@ export default function AuthScreen({
   function handleFormSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (authMode === "SUPER_ADMIN") {
-      submitLogin(
-        { username: usernameInput.trim(), password: passwordInput },
-        forceTakeover
-      );
+      submitLogin({
+        username: usernameInput.trim(),
+        password: passwordInput,
+      });
     } else if (selectedStaffUser) {
-      submitLogin(
-        { userId: selectedStaffUser.id, pin: pinInput },
-        forceTakeover
-      );
+      submitLogin({ userId: selectedStaffUser.id, pin: pinInput });
     }
   }
 
@@ -136,10 +114,7 @@ export default function AuthScreen({
       const next = pinInput + digit;
       setPinInput(next);
       if (next.length === 4) {
-        submitLogin(
-          { userId: selectedStaffUser.id, pin: next },
-          forceTakeover
-        );
+        submitLogin({ userId: selectedStaffUser.id, pin: next });
       }
     }
   }
@@ -174,7 +149,7 @@ export default function AuthScreen({
               <ThemeToggle />
             </div>
 
-            {/* Mode Switcher: Staff Demo PIN vs Super Admin Username + Password */}
+            {/* Mode Switcher: Staff PIN vs Super Admin Username + Password */}
             <div className="mb-6">
               <SegmentedButton
                 value={authMode}
@@ -186,7 +161,7 @@ export default function AuthScreen({
                 options={[
                   {
                     value: "STAFF_PIN",
-                    label: "Demo Staff (PIN)",
+                    label: "Staff (PIN)",
                     icon: <UserCheck className="w-3.5 h-3.5" strokeWidth={1.8} />,
                   },
                   {
@@ -198,103 +173,68 @@ export default function AuthScreen({
               />
             </div>
 
-            {/* Active Single-Session Lock Notice */}
-            {conflictSession && (
-              <div className="mb-6 p-4 rounded-2xl bg-md-error-container text-md-on-error-container space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold flex items-center gap-1.5">
-                    <AlertTriangle className="w-4 h-4 shrink-0" strokeWidth={1.8} />
-                    SINGLE-PROFILE SESSION LOCK ACTIVE
-                  </span>
-                  <span className="text-xs font-mono font-medium px-2.5 py-0.5 rounded-lg bg-md-surface-container-lowest text-md-on-surface">
-                    {conflictSession.sessionId}
-                  </span>
-                </div>
-                <p className="text-sm leading-relaxed">
-                  Currently active:{" "}
-                  <strong>
-                    {conflictSession.userName} ({conflictSession.userRole})
-                  </strong>
-                  . Authenticate on the right to sign in or take over the terminal.
-                </p>
-              </div>
-            )}
-
             {authMode === "STAFF_PIN" ? (
               <>
                 <h2 className="text-xs font-medium uppercase tracking-wider text-md-on-surface-variant mb-3">
-                  Demo Staff Profiles (Manager &amp; Cashier)
+                  Staff Profiles (Manager &amp; Cashier)
                 </h2>
-                <div className="space-y-3">
-                  {staffProfiles.map((u) => {
-                    const isSelected = selectedStaffUser?.id === u.id;
-                    const isCurrentlyLockedUser =
-                      conflictSession?.userId === u.id;
-                    const isDemo = Boolean(u.isDemoAccount);
+                {staffProfiles.length === 0 ? (
+                  <Card variant="tonal" className="text-sm text-md-on-surface-variant">
+                    No staff PIN profiles created yet. Sign in as Super Admin to create staff accounts under Settings.
+                  </Card>
+                ) : (
+                  <div className="space-y-3">
+                    {staffProfiles.map((u) => {
+                      const isSelected = selectedStaffUser?.id === u.id;
 
-                    return (
-                      <div
-                        key={u.id}
-                        onClick={() => {
-                          setSelectedUserId(u.id);
-                          setPinInput("");
-                          setError("");
-                        }}
-                        className={`p-4 rounded-2xl border-0 cursor-pointer transition-colors duration-200 flex items-center justify-between ${
-                          isSelected
-                            ? "bg-md-primary-container/45 ring-2 ring-md-primary/60 shadow-xs"
-                            : "bg-md-surface-container-low hover:bg-md-surface-container-high/70"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3.5">
-                          <Avatar
-                            initials={u.avatarInitials}
-                            variant={isSelected ? "primary" : "tertiary"}
-                          />
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-medium text-md-on-surface text-base">
-                                {u.name}
-                              </span>
-                              <StatusChip
-                                label={u.role}
-                                variant={
-                                  u.role === "MANAGER" ? "success" : "neutral"
-                                }
-                              />
-                              {isDemo && (
-                                <StatusChip label="Demo Account" variant="warning" />
-                              )}
-                              {isCurrentlyLockedUser && (
-                                <StatusChip label="Active Holder" variant="warning" />
-                              )}
-                            </div>
-                            <div className="text-sm text-md-on-surface-variant mt-0.5">
-                              {u.title}
-                              {isDemo && u.pin ? (
-                                <>
-                                  {" "}
-                                  · Demo PIN:{" "}
-                                  <code className="font-mono font-medium text-md-on-surface bg-md-surface-container-high px-2 py-0.5 rounded">
-                                    {u.pin}
-                                  </code>
-                                </>
-                              ) : (
+                      return (
+                        <div
+                          key={u.id}
+                          onClick={() => {
+                            setSelectedUserId(u.id);
+                            setPinInput("");
+                            setError("");
+                          }}
+                          className={`p-4 rounded-2xl border-0 cursor-pointer transition-colors duration-200 flex items-center justify-between ${
+                            isSelected
+                              ? "bg-md-primary-container/45 ring-2 ring-md-primary/60 shadow-xs"
+                              : "bg-md-surface-container-low hover:bg-md-surface-container-high/70"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3.5">
+                            <Avatar
+                              initials={u.avatarInitials}
+                              variant={isSelected ? "primary" : "tertiary"}
+                            />
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-md-on-surface text-base">
+                                  {u.name}
+                                </span>
+                                <StatusChip
+                                  label={u.role}
+                                  variant={
+                                    u.role === "MANAGER" ? "success" : "neutral"
+                                  }
+                                />
+                              </div>
+                              <div className="text-sm text-md-on-surface-variant mt-0.5">
+                                {u.title}
                                 <span className="ml-1.5 text-xs">
                                   · Staff PIN Required
                                 </span>
-                              )}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <span className="text-xs font-medium text-md-primary">
-                          {isSelected ? "Selected" : "Select"}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+                          <span className="text-xs font-medium text-md-primary">
+                            {isSelected ? "Selected" : "Select"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             ) : (
               <Card variant="tonal" className="space-y-3">
@@ -533,21 +473,6 @@ export default function AuthScreen({
                   </button>
                 </div>
               </>
-            )}
-
-            {conflictSession && (
-              <label className="flex items-center gap-2.5 pt-2 text-xs text-md-on-surface-variant cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={forceTakeover}
-                  onChange={(e) => setForceTakeover(e.target.checked)}
-                  className="w-4 h-4 accent-md-primary rounded"
-                />
-                <span>
-                  End active session for{" "}
-                  <strong>{conflictSession.userName}</strong> on sign-in
-                </span>
-              </label>
             )}
           </form>
         </div>

@@ -13,7 +13,7 @@ A full-stack **Next.js 16 (App Router) + React 19 + TypeScript + Tailwind CSS v4
 | **Language** | TypeScript | `^5.7.2` | End-to-end static typing across domain models, API contracts, and UI components |
 | **Styling** | Tailwind CSS + `@tailwindcss/postcss` + PostCSS | `^4.3.5` / `^8.4.49` | `@theme`-mapped Material Design 3 CSS variables with Light & Dark (`[data-theme="dark"]`) support |
 | **Typography** | `next/font/google` (`Roboto`, `Roboto_Mono`) | Built-in Next.js | Self-hosted/optimized Material typography + `tabular-nums` monospace financial figures |
-| **Icons & Brand** | `lucide-react` + Custom SVG | `^0.468.0` | Consistent vector UI iconography and the custom **Spark Crest** (`S`) brand logo (`src/app/icon.svg`, `StackLyraLogo`) |
+| **Icons & Brand** | `lucide-react` + Custom SVG | `^0.468.0` | Consistent vector UI iconography and the **StackLyra** origami bird mark enclosed in an M3 squircle (`src/app/icon.svg`, `StackLyraLogo`) |
 | **Database** | `mongodb` (Official Node.js Driver) | `^7.9.0` | MongoDB Atlas / local MongoDB persistence (configured via `serverExternalPackages: ["mongodb"]` in `next.config.ts`) |
 | **Cryptography** | Node.js `node:crypto` | Built-in (`@types/node ^22.10.0`) | Zero-dependency `scrypt` salted password hashing, RFC 7519 `HS256` JWT signing/verification, `timingSafeEqual` comparisons |
 
@@ -27,7 +27,7 @@ src/
 ├── app/
 │   ├── layout.tsx                        # Root layout, Google fonts, metadata, anti-FOUC theme script
 │   ├── globals.css                       # Tailwind v4 @import + Material 3 Light/Dark CSS tokens
-│   ├── icon.svg                          # StackLyra Spark Crest browser favicon
+│   ├── icon.svg                          # StackLyra origami bird (in M3 squircle) browser favicon
 │   ├── loading.tsx                       # App Router Suspense pre-hydration fallback -> WorkspaceSplash
 │   ├── page.tsx                          # Home entry (defaults to dashboard)
 │   ├── dashboard/page.tsx                # Dashboard view route
@@ -62,8 +62,8 @@ src/
 │   ├── nav.ts                            # `ERP_BRAND_CONFIG` ("StackLyra ERP") & RBAC-filtered navigation registry
 │   ├── format.ts                         # Currency/date formatting helpers
 │   ├── types.ts                          # Shared domain interfaces & union types
-│   ├── seed-data.ts                      # Initial Super Admin, demo staff, catalog, parties, ledger, & PRA config
-│   └── mock/erp-data.ts                  # Initial ERP invoices, waiting tasks, & stock monitor data
+│   ├── seed-data.ts                      # Initial Super Admin bootstrap (`Saad`) & clean empty workspace defaults
+│   └── mock/erp-data.ts                  # Shared ERP invoice/task/stock interfaces & empty default baselines
 └── components/
     ├── AuthScreen.tsx                    # Split login view (Demo Staff PIN selector + Super Admin credentials)
     ├── DishVisual.tsx                    # Product/dish visual card helper
@@ -84,14 +84,13 @@ src/
 - **Security Headers (`src/middleware.ts`):** Every response applies `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, and `X-ERP-Tenant-Boundary: TENANT_ALBARKA`. All `/api/*` routes enforce `Cache-Control: no-store, max-age=0`.
 - **NoSQL Operator Sanitization (`src/core/validation/index.ts`):** Incoming JSON payloads pass through `sanitizeNoSqlPayload()`, recursively stripping keys beginning with `$` or containing `.` to neutralize MongoDB operator injection (`$gt`, `$ne`, `$where`, etc.).
 
-### Authentication & Single-Active-Session Lock
+### Authentication & Multi-Terminal JWT Sessions
 - **Two Credential Tiers:**
   - **Owner / Super Admin (`ADMIN`, e.g., `Saad`):** Authenticates exclusively via username/email + password (`authType: "PASSWORD"`). Passwords are stored as salted `scrypt$<salt>$<hash>` strings (`src/lib/password.ts`) and can also be overridden cleanly via `ADMIN_USERNAME` / `ADMIN_PASSWORD` environment variables. Legacy 4-digit admin PINs are stripped during schema normalization (`mergeWithDefaults`).
-  - **Staff Profiles (`MANAGER`, `CASHIER`):** Support fast shift PIN login on the POS terminal. Only non-admin demo accounts (`isDemoAccount: true`) surface quick-fill hints on `AuthScreen`.
+  - **Staff Profiles (`MANAGER`, `CASHIER`):** Created by Super Admin under **Settings → Staff roles & profiles** for fast shift PIN login on POS terminals.
 - **Brute-Force Protection (`src/app/api/auth/route.ts`):** Sliding-window per-IP + identifier rate limiter (`MAX_FAILED_ATTEMPTS = 8` within a `5`-minute window).
-- **HTTP-Only HS256 JWT + Single Session Lock (`src/lib/auth-jwt.ts`, `src/core/auth/index.ts`):**
-  - Successful authentication mints an HMAC-SHA256 JWT stored in an `httpOnly`, `SameSite=Lax` cookie (`albarka_session_jwt`, `secure: true` in production) valid for 8 hours on login or 12 hours on refresh (`REFRESH_SESSION`).
-  - Every JWT embeds a unique `sid` claim that must match `db.activeSession.sessionId` on the server; signing in elsewhere or signing out immediately invalidates prior tokens.
+- **HTTP-Only HS256 JWT (`src/lib/auth-jwt.ts`, `src/core/auth/index.ts`):**
+  - Successful authentication mints a stateless HMAC-SHA256 JWT stored in an `httpOnly`, `SameSite=Lax` cookie (`albarka_session_jwt`, `secure: true` in production) valid for 8 hours on login or 12 hours on refresh (`REFRESH_SESSION`), supporting concurrent logins across multiple terminals/browsers without single-session locking.
 - **Client Sanitization (`sanitizeUserForClient`):** `passwordHash` is stripped from every response; `ADMIN` profiles and credentials are withheld when queried by non-admin viewers (`/api/state` also restricts ledger entries, supplier/staff balances, immutable audit logs, and masked MongoDB URIs by role permissions).
 
 ### 3-Tier Granular RBAC (`src/core/auth/permissions.ts`)
@@ -179,7 +178,7 @@ npm run dev
 Open `http://localhost:3000` (or `/dashboard`, `/invoices`, `/invoices/new`).
 
 - **Super Admin (`ADMIN` — Saad):** Sign in via **Super Admin** mode using `ADMIN_USERNAME` / `ADMIN_PASSWORD` (or your stored DB password, rotatable anytime under Settings).
-- **Demo Staff Accounts (`PIN` mode):** **Manager** (`2222`) · **Cashier** (`3333`).
+- **Staff Accounts (`PIN` mode):** Created by Super Admin under **Settings → Staff roles & profiles** (no demo accounts or default PINs ship out of the box).
 
 ### Production Build
 

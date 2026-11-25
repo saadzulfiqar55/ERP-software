@@ -51,37 +51,47 @@ export async function GET() {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
 
-  // Auto-expire stale server session if past expiresAt
-  if (db.activeSession && new Date(db.activeSession.expiresAt).getTime() < Date.now()) {
-    db.activeSession = null;
-    await writeDbAsync(db, ["SESSIONS"]);
-  }
-
   if (!token) {
     return NextResponse.json({
       authenticated: false,
       user: null,
-      activeSession: db.activeSession,
+      activeSession: null,
       sessionAuditLogs: db.sessionAuditLogs,
     });
   }
 
   const decoded = verifyJwt(token);
-  if (!decoded || !db.activeSession || db.activeSession.sessionId !== decoded.sid) {
+  if (!decoded) {
     return NextResponse.json({
       authenticated: false,
       user: null,
-      activeSession: db.activeSession,
+      activeSession: null,
       sessionAuditLogs: db.sessionAuditLogs,
     });
   }
 
   const user = db.users.find((u) => u.id === decoded.sub) || null;
+  const sessionView: ActiveSession | null = user
+    ? {
+        sessionId: decoded.sid,
+        userId: user.id,
+        userName: user.name,
+        userRole: user.role,
+        userTitle: user.title,
+        email: user.email,
+        authMethod: decoded.authMethod,
+        issuedAt: new Date(decoded.iat * 1000).toISOString(),
+        expiresAt: new Date(decoded.exp * 1000).toISOString(),
+        lastHeartbeatAt: new Date().toISOString(),
+        jwtTokenPreview: `${token.slice(0, 28)}...${token.slice(-16)}`,
+      }
+    : null;
+
   return NextResponse.json({
     authenticated: Boolean(user),
     user: user ? sanitizeUserForClient(user, user) : null,
     decodedJwt: decoded,
-    activeSession: db.activeSession,
+    activeSession: sessionView,
     sessionAuditLogs: db.sessionAuditLogs,
   });
 }
@@ -97,20 +107,26 @@ export async function POST(request: Request) {
       db.activeSession = null;
     }
 
-    // 1. LOGOUT / REVOKE SESSION
+    // 1. LOGOUT / CLEAR CALLER COOKIE
     if (body.action === "LOGOUT") {
-      if (db.activeSession) {
+      const token = cookieStore.get(COOKIE_NAME)?.value;
+      const decoded = token ? verifyJwt(token) : null;
+      const actor = decoded ? db.users.find((u) => u.id === decoded.sub) : null;
+
+      if (actor && decoded) {
         const logEntry: SessionAuditLog = {
           id: `audit-${Date.now()}`,
           timestamp: new Date().toISOString(),
           event: "LOGOUT",
-          userId: db.activeSession.userId,
-          userName: db.activeSession.userName,
-          userRole: db.activeSession.userRole,
-          details: `Session ${db.activeSession.sessionId} signed out cleanly.`,
+          userId: actor.id,
+          userName: actor.name,
+          userRole: actor.role,
+          details: `Session ${decoded.sid} signed out cleanly.`,
         };
         db.sessionAuditLogs = [logEntry, ...db.sessionAuditLogs.slice(0, 29)];
-        db.activeSession = null;
+        if (db.activeSession?.sessionId === decoded.sid) {
+          db.activeSession = null;
+        }
         await writeDbAsync(db, ["SESSIONS", "AUDIT_LOGS"]);
       }
       cookieStore.delete(COOKIE_NAME);
@@ -121,36 +137,43 @@ export async function POST(request: Request) {
       });
     }
 
-    // 2. REFRESH / EXTEND ACTIVE SESSION (+4 HOURS)
+    // 2. REFRESH / EXTEND CALLER SESSION (+12 HOURS)
     if (body.action === "REFRESH_SESSION") {
-      if (!db.activeSession) {
-        return NextResponse.json({ error: "No active session to refresh" }, { status: 400 });
+      const token = cookieStore.get(COOKIE_NAME)?.value;
+      const decoded = token ? verifyJwt(token) : null;
+      if (!decoded) {
+        return NextResponse.json({ error: "No active session to refresh" }, { status: 401 });
       }
-      const user = db.users.find((u) => u.id === db.activeSession?.userId);
+      const user = db.users.find((u) => u.id === decoded.sub);
       if (!user) {
         return NextResponse.json({ error: "User not found" }, { status: 404 });
       }
 
       const sessionId = `SES-${Date.now().toString().slice(-6)}`;
-      const { token, fullPayload } = signJwt(
+      const { token: refreshedToken, fullPayload } = signJwt(
         {
           sub: user.id,
           name: user.name,
           role: user.role,
           email: user.email,
           sid: sessionId,
-          authMethod: db.activeSession.authMethod,
+          authMethod: decoded.authMethod,
         },
         12 * 60 * 60
       );
 
       const updatedSession: ActiveSession = {
-        ...db.activeSession,
         sessionId,
+        userId: user.id,
+        userName: user.name,
+        userRole: user.role,
+        userTitle: user.title,
+        email: user.email,
+        authMethod: decoded.authMethod,
         issuedAt: new Date(fullPayload.iat * 1000).toISOString(),
         expiresAt: new Date(fullPayload.exp * 1000).toISOString(),
         lastHeartbeatAt: new Date().toISOString(),
-        jwtTokenPreview: `${token.slice(0, 28)}...${token.slice(-16)}`,
+        jwtTokenPreview: `${refreshedToken.slice(0, 28)}...${refreshedToken.slice(-16)}`,
       };
 
       const logEntry: SessionAuditLog = {
@@ -167,7 +190,7 @@ export async function POST(request: Request) {
       db.sessionAuditLogs = [logEntry, ...db.sessionAuditLogs.slice(0, 29)];
       await writeDbAsync(db, ["SESSIONS", "AUDIT_LOGS"]);
 
-      cookieStore.set(COOKIE_NAME, token, {
+      cookieStore.set(COOKIE_NAME, refreshedToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         path: "/",
@@ -184,7 +207,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // 3. LOGIN (USERNAME + PASSWORD FOR ADMIN, PIN FOR STAFF DEMO) WITH RATE LIMITING
+    // 3. LOGIN (USERNAME + PASSWORD FOR ADMIN, PIN FOR STAFF) WITH RATE LIMITING
     const identifier =
       typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
     const rateKey = getClientKey(
@@ -273,40 +296,6 @@ export async function POST(request: Request) {
     clearFailedAttempts(rateKey);
     const authMethod: "JWT_PIN" | "OAUTH_SSO" = "JWT_PIN";
 
-    // STRICT SINGLE-PROFILE LOCK CHECK:
-    // If another profile is already logged in, block unless forceTakeover is authorized
-    if (
-      db.activeSession &&
-      db.activeSession.userId !== targetUser.id &&
-      !body.forceTakeover
-    ) {
-      const conflictLog: SessionAuditLog = {
-        id: `audit-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        event: "SESSION_LOCKED_CONFLICT",
-        userId: targetUser.id,
-        userName: targetUser.name,
-        userRole: targetUser.role,
-        details: `Blocked concurrent login: ${db.activeSession.userName} (${db.activeSession.userRole}) is already logged in.`,
-      };
-      db.sessionAuditLogs = [conflictLog, ...db.sessionAuditLogs.slice(0, 29)];
-      await writeDbAsync(db, ["AUDIT_LOGS"]);
-
-      return NextResponse.json(
-        {
-          error: `Single-Session Lock Active: ${db.activeSession.userName} (${db.activeSession.userRole}) is currently logged in. Only one profile can be logged in at a single time.`,
-          conflictSession: db.activeSession,
-          sessionAuditLogs: db.sessionAuditLogs,
-        },
-        { status: 409 }
-      );
-    }
-
-    const isTakeover =
-      Boolean(db.activeSession) &&
-      db.activeSession?.userId !== targetUser.id &&
-      Boolean(body.forceTakeover);
-
     const sessionId = `SES-${Date.now().toString().slice(-6)}`;
     const { token, fullPayload } = signJwt(
       {
@@ -337,13 +326,11 @@ export async function POST(request: Request) {
     const auditEntry: SessionAuditLog = {
       id: `audit-${Date.now()}`,
       timestamp: new Date().toISOString(),
-      event: isTakeover ? "ADMIN_FORCE_TAKEOVER" : "LOGIN_SUCCESS",
+      event: "LOGIN_SUCCESS",
       userId: targetUser.id,
       userName: targetUser.name,
       userRole: targetUser.role,
-      details: isTakeover
-        ? `Force-terminated previous session and locked terminal for ${targetUser.name} (${authMethod}).`
-        : `Signed in via ${authMethod} (Session ${sessionId}). Single-session lock acquired.`,
+      details: `Signed in via ${authMethod} (Session ${sessionId}).`,
     };
 
     db.activeSession = newSession;

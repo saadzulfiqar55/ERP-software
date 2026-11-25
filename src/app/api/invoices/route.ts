@@ -3,7 +3,7 @@ import { appendAuditLog } from "@/core/audit";
 import { assertActorPermission } from "@/core/auth";
 import { withTransaction } from "@/core/db";
 import { sanitizeNoSqlPayload } from "@/core/validation";
-import { ERPInvoice, INITIAL_ERP_INVOICES } from "@/lib/mock/erp-data";
+import { ERPInvoice } from "@/lib/mock/erp-data";
 
 export async function POST(request: Request) {
   try {
@@ -12,10 +12,7 @@ export async function POST(request: Request) {
     const action = String(body.action || "");
 
     const { db } = await withTransaction(async (txDb) => {
-      const currentList: ERPInvoice[] =
-        txDb.erpInvoices && txDb.erpInvoices.length > 0
-          ? txDb.erpInvoices
-          : [...INITIAL_ERP_INVOICES];
+      const currentList: ERPInvoice[] = txDb.erpInvoices ?? [];
 
       if (action === "VOID" || action === "DELETE") {
         // Strictly Owner / Super Admin ONLY

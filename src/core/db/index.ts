@@ -37,7 +37,7 @@ export function nextSequentialNumber(
   const counters = txDb.documentCounters || [];
   const idx = counters.findIndex((c) => c.key === counterKey);
 
-  let nextSeq = docType === "INVOICE" || docType === "USIN" ? 1003 : 105;
+  let nextSeq = 1;
   if (idx !== -1) {
     nextSeq = counters[idx].seq + 1;
     counters[idx] = { key: counterKey, seq: nextSeq };

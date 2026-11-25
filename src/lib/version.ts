@@ -66,6 +66,17 @@ export const ERP_VERSION_POLICY = {
 
 export const ERP_RELEASES: ReleaseNoteItem[] = [
   {
+    version: "v0.5.2",
+    stage: ERP_RELEASE_STAGE,
+    summary:
+      "Production clean slate: removed single-session lock, removed all demo entries, and unified brand icon with stacklyra.com.",
+    highlights: [
+      "Removed single-session terminal lock for concurrent multi-terminal JWT sign-ins",
+      "Purged all demo accounts, mock dashboard revenue, and seed business entries",
+      "Integrated the StackLyra origami bird mark from stacklyra.com inside the M3 squircle",
+    ],
+  },
+  {
     version: "v0.5.1",
     stage: ERP_RELEASE_STAGE,
     summary:

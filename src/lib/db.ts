@@ -132,36 +132,19 @@ export function getPublicMongoConfig(config: MongoDBConfig): MongoDBConfig {
   };
 }
 
-const DEFAULT_CASHIER_SHIFT: CashierShift = {
-  id: "shift-2026-11-17-morning",
-  tenantId: "TENANT_ALBARKA",
-  branchId: "BRANCH_GULBERG_01",
-  openedAt: "2026-11-17T08:00:00.000Z",
-  openedBy: "Saad (ADMIN)",
-  openingFloatMinor: 2500000, // PKR 25,000 opening float in paisa
-  cashSalesMinor: 603200, // PKR 6,032
-  cardSalesMinor: 490800, // PKR 4,908
-  pettyCashPayoutsMinor: 0,
-  expectedClosingCashMinor: 3103200, // PKR 31,032
-  status: "OPEN",
-};
-
 const DEFAULT_FISCAL_PERIODS: FiscalPeriod[] = [
   {
-    periodKey: "2026-10",
-    label: "October 2026 (Closed Fiscal Period)",
-    isLocked: true,
-    lockedAt: "2026-11-02T10:00:00.000Z",
-    lockedBy: "Saad (ADMIN)",
-  },
-  {
-    periodKey: "2026-11",
-    label: "November 2026 (Current Active Period)",
+    periodKey: new Date().toISOString().slice(0, 7),
+    label: `${new Date().toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    })} (Active Period)`,
     isLocked: false,
   },
 ];
 
 function buildDefaults(): DatabaseSchema {
+  const currentYear = new Date().getFullYear();
   return {
     praConfig: INITIAL_PRA_CONFIG,
     mongoConfig: DEFAULT_MONGO_CONFIG,
@@ -173,29 +156,14 @@ function buildDefaults(): DatabaseSchema {
     users: INITIAL_USERS,
     activeSession: null,
     sessionAuditLogs: [],
-    immutableAuditLogs: [
-      {
-        id: "aud-init-1",
-        tenantId: "TENANT_ALBARKA",
-        branchId: "BRANCH_GULBERG_01",
-        timestamp: "2026-11-17T08:00:00.000Z",
-        actorId: "user-admin-1",
-        actorName: "Saad",
-        actorRole: "ADMIN",
-        module: "POS",
-        action: "CREATE",
-        entityType: "CashierShift",
-        entityId: "shift-2026-11-17-morning",
-        summary: "Opened register shift with PKR 25,000 opening float.",
-      },
-    ],
+    immutableAuditLogs: [],
     idempotencyRecords: [],
     documentCounters: [
-      { key: "TENANT_ALBARKA:INVOICE:2026", seq: 1002 },
-      { key: "TENANT_ALBARKA:USIN:2026", seq: 1002 },
-      { key: "TENANT_ALBARKA:VOUCHER:2026", seq: 104 },
+      { key: `TENANT_ALBARKA:INVOICE:${currentYear}`, seq: 0 },
+      { key: `TENANT_ALBARKA:USIN:${currentYear}`, seq: 0 },
+      { key: `TENANT_ALBARKA:VOUCHER:${currentYear}`, seq: 0 },
     ],
-    cashierShifts: [DEFAULT_CASHIER_SHIFT],
+    cashierShifts: [],
     fiscalPeriods: DEFAULT_FISCAL_PERIODS,
     waitingTasks: INITIAL_WAITING_TASKS,
     stockMonitor: INITIAL_STOCK_MONITOR,
@@ -238,16 +206,9 @@ function mergeWithDefaults(
     }
     return {
       ...u,
-      username:
-        u.username ||
-        (u.id === "user-manager-1"
-          ? "manager"
-          : u.id === "user-cashier-1"
-          ? "cashier"
-          : u.email.split("@")[0]),
+      username: u.username || u.email.split("@")[0],
       authType: u.authType || ("PIN" as const),
-      isDemoAccount:
-        u.isDemoAccount ?? (u.id === "user-manager-1" || u.id === "user-cashier-1"),
+      isDemoAccount: false,
     };
   });
 
@@ -255,31 +216,19 @@ function mergeWithDefaults(
     ...defaults,
     ...parsed,
     users: normalizedUsers,
-    erpInvoices:
-      parsed.erpInvoices && parsed.erpInvoices.length > 0
-        ? parsed.erpInvoices
-        : INITIAL_ERP_INVOICES,
+    erpInvoices: parsed.erpInvoices ?? defaults.erpInvoices,
     mongoConfig: envMongo || parsed.mongoConfig || DEFAULT_MONGO_CONFIG,
     sessionAuditLogs: parsed.sessionAuditLogs || [],
-    immutableAuditLogs: parsed.immutableAuditLogs || defaults.immutableAuditLogs,
+    immutableAuditLogs: parsed.immutableAuditLogs ?? defaults.immutableAuditLogs,
     idempotencyRecords: parsed.idempotencyRecords || [],
-    documentCounters: parsed.documentCounters || defaults.documentCounters,
-    cashierShifts:
-      parsed.cashierShifts && parsed.cashierShifts.length > 0
-        ? parsed.cashierShifts
-        : defaults.cashierShifts,
+    documentCounters: parsed.documentCounters ?? defaults.documentCounters,
+    cashierShifts: parsed.cashierShifts ?? defaults.cashierShifts,
     fiscalPeriods:
       parsed.fiscalPeriods && parsed.fiscalPeriods.length > 0
         ? parsed.fiscalPeriods
         : defaults.fiscalPeriods,
-    waitingTasks:
-      parsed.waitingTasks && parsed.waitingTasks.length > 0
-        ? parsed.waitingTasks
-        : defaults.waitingTasks,
-    stockMonitor:
-      parsed.stockMonitor && parsed.stockMonitor.length > 0
-        ? parsed.stockMonitor
-        : defaults.stockMonitor,
+    waitingTasks: parsed.waitingTasks ?? defaults.waitingTasks,
+    stockMonitor: parsed.stockMonitor ?? defaults.stockMonitor,
   };
 }
 

@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/m3";
 import {
   ERPInvoice,
-  INITIAL_MONTHLY_REVENUE,
+  MonthlyRevenuePoint,
   StockLevelMonitorItem,
   WaitingTaskItem,
 } from "@/lib/mock/erp-data";
@@ -88,8 +88,15 @@ export default function DashboardView({
       orders.reduce((sum, o) => sum + Math.round(o.taxBreakdown.grandTotal * 100), 0),
     [orders]
   );
+  const paidInvoicesRevenueMinor = useMemo(
+    () =>
+      erpInvoices
+        .filter((inv) => inv.status === "PAID")
+        .reduce((sum, inv) => sum + inv.amountMinor, 0),
+    [erpInvoices]
+  );
   const revenueMinor = Math.round(
-    (253200000 + liveOrdersRevenueMinor) * rangeMultiplier
+    (liveOrdersRevenueMinor + paidInvoicesRevenueMinor) * rangeMultiplier
   );
 
   const openInvoices = useMemo(
@@ -117,24 +124,79 @@ export default function DashboardView({
   }, [openInvoices, parties, canViewLedger]);
 
   const lowStockItems = useMemo(
-    () => stockItems.filter((s) => s.currentQty / s.reorderTarget < 0.35),
+    () => stockItems.filter((s) => s.reorderTarget > 0 && s.currentQty / s.reorderTarget < 0.35),
     [stockItems]
   );
   const criticalStockCount = useMemo(
-    () => stockItems.filter((s) => s.currentQty / s.reorderTarget < 0.15).length,
+    () => stockItems.filter((s) => s.reorderTarget > 0 && s.currentQty / s.reorderTarget < 0.15).length,
     [stockItems]
   );
 
+  const now = new Date();
+  const activeYear = now.getFullYear();
+  const currentMonthIdx = now.getMonth();
+  const currentMonthShort = now.toLocaleDateString("en-US", { month: "short" });
+  const currentPeriodLabel = now.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+
+  const monthlyRevenue = useMemo<MonthlyRevenuePoint[]>(() => {
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const buckets = new Array<number>(12).fill(0);
+
+    for (const ord of orders) {
+      const d = new Date(ord.createdAt);
+      if (!Number.isNaN(d.getTime()) && d.getFullYear() === activeYear) {
+        buckets[d.getMonth()] += Math.round(ord.taxBreakdown.grandTotal * 100);
+      }
+    }
+    for (const inv of erpInvoices) {
+      if (inv.status !== "PAID") continue;
+      const d = new Date(inv.issuedDate);
+      if (!Number.isNaN(d.getTime()) && d.getFullYear() === activeYear) {
+        buckets[d.getMonth()] += inv.amountMinor;
+      }
+    }
+
+    return monthNames.map((month, idx) => ({
+      month,
+      revenueMinor: buckets[idx],
+      isCurrent: idx === currentMonthIdx,
+    }));
+  }, [orders, erpInvoices, activeYear, currentMonthIdx]);
+
   const maxBarMinor = Math.max(
-    ...INITIAL_MONTHLY_REVENUE.map((m) => m.revenueMinor)
+    1,
+    ...monthlyRevenue.map((m) => m.revenueMinor)
   );
+  const maxBarPkr = maxBarMinor / 100;
+  const formatAxisTick = (pkr: number) => {
+    if (pkr <= 0) return "0";
+    if (pkr >= 1_000_000) return `${(pkr / 1_000_000).toFixed(1)}M`;
+    if (pkr >= 1_000) return `${Math.round(pkr / 1_000)}k`;
+    return `${Math.round(pkr)}`;
+  };
 
   return (
     <div className="space-y-6">
       {/* 1. PageHeader with Right-Aligned SegmentedButton */}
       <PageHeader
         title="Dashboard"
-        subtitle="Business overview · November 2026"
+        subtitle={`Business overview · ${currentPeriodLabel}`}
         actions={
           <SegmentedButton
             value={range}
@@ -159,12 +221,12 @@ export default function DashboardView({
       {/* 2. KPI Row — 4 Material 3 StatCards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
         <StatCard
-          label="Revenue (month to date)"
+          label="Revenue (live ledger)"
           value={formatMinorMoney(revenueMinor, "PKR")}
           icon={<TrendingUp className="w-5 h-5" strokeWidth={1.8} />}
-          chipLabel="+8.2%"
-          chipVariant="success"
-          caption="vs last month"
+          chipLabel={`${orders.length} orders`}
+          chipVariant="primary"
+          caption="POS + paid invoices"
         />
         <StatCard
           label="Sales orders & open bills"
@@ -214,7 +276,7 @@ export default function DashboardView({
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded-xs bg-md-primary-strong inline-block" />
-                <span>Current month (Nov)</span>
+                <span>Current month ({currentMonthShort})</span>
               </div>
             </div>
           </div>
@@ -223,19 +285,20 @@ export default function DashboardView({
           <div className="flex gap-4 items-end h-64 pt-6 pb-2">
             {/* Y-Axis Labels */}
             <div className="flex flex-col justify-between h-full text-xs font-mono text-md-on-surface-variant tabular-nums pr-2 select-none">
-              <span>2.5M</span>
-              <span>2.0M</span>
-              <span>1.5M</span>
-              <span>1.0M</span>
+              <span>{maxBarMinor > 1 ? formatAxisTick(maxBarPkr) : "—"}</span>
+              <span>{maxBarMinor > 1 ? formatAxisTick(maxBarPkr * 0.75) : "—"}</span>
+              <span>{maxBarMinor > 1 ? formatAxisTick(maxBarPkr * 0.5) : "—"}</span>
+              <span>{maxBarMinor > 1 ? formatAxisTick(maxBarPkr * 0.25) : "—"}</span>
               <span>0</span>
             </div>
 
             {/* 12 Bars */}
             <div className="flex-1 grid grid-cols-12 gap-2 sm:gap-3 items-end h-full border-b border-l border-md-divider pl-2 pb-1">
-              {INITIAL_MONTHLY_REVENUE.map((point) => {
-                const heightPct = Math.round(
-                  (point.revenueMinor / maxBarMinor) * 100
-                );
+              {monthlyRevenue.map((point) => {
+                const heightPct =
+                  point.revenueMinor > 0
+                    ? Math.max(4, Math.round((point.revenueMinor / maxBarMinor) * 100))
+                    : 0;
                 const isHovered = hoveredMonth === point.month;
 
                 return (
@@ -269,7 +332,7 @@ export default function DashboardView({
           {/* Month X-Axis Labels */}
           <div className="flex gap-4 pl-10 pt-2">
             <div className="flex-1 grid grid-cols-12 gap-2 sm:gap-3 text-center text-xs text-md-on-surface-variant font-medium">
-              {INITIAL_MONTHLY_REVENUE.map((point) => (
+              {monthlyRevenue.map((point) => (
                 <span
                   key={point.month}
                   className={
@@ -395,47 +458,54 @@ export default function DashboardView({
             </Button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-md-divider text-xs font-medium text-md-on-surface-variant">
-                  <th className="py-3 pr-4">Order</th>
-                  <th className="py-3 px-4">Customer</th>
-                  <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4 text-right">Amount</th>
-                  <th className="py-3 pl-4 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-md-divider">
-                {orders.slice(0, 6).map((ord) => (
-                  <tr
-                    key={ord.id}
-                    onClick={() => onSelectOrderReceipt?.(ord)}
-                    className="hover:bg-md-surface-container-low cursor-pointer transition"
-                  >
-                    <td className="py-3.5 pr-4 font-mono font-medium text-md-primary">
-                      {ord.invoiceNumber}
-                    </td>
-                    <td className="py-3.5 px-4 text-md-on-surface">
-                      {ord.customerName || "Walk-in Customer"}
-                    </td>
-                    <td className="py-3.5 px-4 text-md-on-surface-variant text-xs">
-                      {formatIsoDate(ord.createdAt)}
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-mono font-medium tabular-nums text-md-on-surface">
-                      PKR {ord.taxBreakdown.grandTotal.toLocaleString()}
-                    </td>
-                    <td className="py-3.5 pl-4 text-right">
-                      <StatusChip
-                        label={ord.praSyncStatus === "SYNCED" ? "Paid · PRA" : "Pending"}
-                        variant={mapInvoiceStatusToChipVariant(ord.praSyncStatus)}
-                      />
-                    </td>
+          {orders.length === 0 ? (
+            <EmptyState
+              title="No sales orders yet"
+              subtitle="Completed POS transactions will appear here automatically."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-md-divider text-xs font-medium text-md-on-surface-variant">
+                    <th className="py-3 pr-4">Order</th>
+                    <th className="py-3 px-4">Customer</th>
+                    <th className="py-3 px-4">Date</th>
+                    <th className="py-3 px-4 text-right">Amount</th>
+                    <th className="py-3 pl-4 text-right">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-md-divider">
+                  {orders.slice(0, 6).map((ord) => (
+                    <tr
+                      key={ord.id}
+                      onClick={() => onSelectOrderReceipt?.(ord)}
+                      className="hover:bg-md-surface-container-low cursor-pointer transition"
+                    >
+                      <td className="py-3.5 pr-4 font-mono font-medium text-md-primary">
+                        {ord.invoiceNumber}
+                      </td>
+                      <td className="py-3.5 px-4 text-md-on-surface">
+                        {ord.customerName || "Walk-in Customer"}
+                      </td>
+                      <td className="py-3.5 px-4 text-md-on-surface-variant text-xs">
+                        {formatIsoDate(ord.createdAt)}
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-mono font-medium tabular-nums text-md-on-surface">
+                        PKR {ord.taxBreakdown.grandTotal.toLocaleString()}
+                      </td>
+                      <td className="py-3.5 pl-4 text-right">
+                        <StatusChip
+                          label={ord.praSyncStatus === "SYNCED" ? "Paid · PRA" : "Pending"}
+                          variant={mapInvoiceStatusToChipVariant(ord.praSyncStatus)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
 
         {/* Right 4 Cols (1/3): Stock Levels Card */}
@@ -454,36 +524,45 @@ export default function DashboardView({
             </Button>
           </div>
 
-          <div className="space-y-4">
-            {stockItems.map((stk) => {
-              const pct = Math.round((stk.currentQty / stk.reorderTarget) * 100);
-              return (
-                <div key={stk.id} className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 text-sm">
-                    <span className="font-medium text-md-on-surface truncate">
-                      {stk.name}
-                    </span>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs font-mono tabular-nums text-md-on-surface-variant">
-                        {stk.currentQty} / {stk.reorderTarget} {stk.unit} ({pct}%)
+          {stockItems.length === 0 ? (
+            <EmptyState
+              title="No stock monitors configured"
+              subtitle="Add retail inventory items to track stock thresholds here."
+            />
+          ) : (
+            <div className="space-y-4">
+              {stockItems.map((stk) => {
+                const pct = stk.reorderTarget > 0
+                  ? Math.round((stk.currentQty / stk.reorderTarget) * 100)
+                  : 0;
+                return (
+                  <div key={stk.id} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 text-sm">
+                      <span className="font-medium text-md-on-surface truncate">
+                        {stk.name}
                       </span>
-                      {pct < 35 && canAdjustStock && (
-                        <Button
-                          variant="text"
-                          size="sm"
-                          onClick={() => onReorderStock(stk)}
-                          className="h-7! px-2! text-xs!"
-                        >
-                          Reorder
-                        </Button>
-                      )}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-mono tabular-nums text-md-on-surface-variant">
+                          {stk.currentQty} / {stk.reorderTarget} {stk.unit} ({pct}%)
+                        </span>
+                        {pct < 35 && canAdjustStock && (
+                          <Button
+                            variant="text"
+                            size="sm"
+                            onClick={() => onReorderStock(stk)}
+                            className="h-7! px-2! text-xs!"
+                          >
+                            Reorder
+                          </Button>
+                        )}
+                      </div>
                     </div>
+                    <ProgressBar value={stk.currentQty} max={stk.reorderTarget} />
                   </div>
-                  <ProgressBar value={stk.currentQty} max={stk.reorderTarget} />
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       </div>
     </div>

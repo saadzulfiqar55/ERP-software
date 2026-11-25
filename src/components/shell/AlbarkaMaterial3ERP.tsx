@@ -118,7 +118,7 @@ const AuthScreen = dynamic(() => import("@/components/AuthScreen"), {
 });
 
 const EMPTY_PRA_CONFIG: PRAConfig = {
-  restaurantName: "ALBARKA RESTAURANT & BAKERS",
+  restaurantName: "StackLyra Workspace",
   branchName: "",
   ntn: "",
   strn: "",
@@ -2955,7 +2955,7 @@ export function AlbarkaMaterial3ERP({
                     { id: "MONGODB_DATABASE", label: "MongoDB", visible: canManagePra },
                     { id: "RESTAURANT_PROFILES", label: "Staff roles & profiles", visible: canManageUsers },
                     { id: "ERP_AUDIT_COMPLIANCE", label: "Audit trail", visible: canViewLedger },
-                    { id: "SESSION_JWT_MANAGER", label: "JWT & session lock", visible: true },
+                    { id: "SESSION_JWT_MANAGER", label: "JWT session", visible: true },
                     { id: "APPEARANCE", label: "Appearance", visible: true },
                   ] as const
                 )
@@ -3059,7 +3059,7 @@ export function AlbarkaMaterial3ERP({
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h2 className="text-base font-semibold text-md-on-surface">
-                        Active HS256 JWT session & single-profile lock
+                        Active HS256 JWT session
                       </h2>
                       <p className="text-xs text-md-on-surface-variant">
                         Session ID: {activeSession?.sessionId} · Holder:{" "}
