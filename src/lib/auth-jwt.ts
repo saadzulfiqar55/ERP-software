@@ -1,8 +1,29 @@
 import crypto from "crypto";
 import { UserRole } from "./types";
 
-const JWT_SECRET =
-  process.env.JWT_SECRET || "albarka_pos_super_secret_hmac_sha256_key_2026";
+declare global {
+  // eslint-disable-next-line no-var
+  var __stacklyraEphemeralJwtSecret: string | undefined;
+}
+
+function getJwtSecret(): string {
+  const configured = process.env.JWT_SECRET?.trim();
+  if (configured) return configured;
+
+  if (process.env.NODE_ENV === "production") {
+    if (!globalThis.__stacklyraEphemeralJwtSecret) {
+      globalThis.__stacklyraEphemeralJwtSecret = crypto
+        .randomBytes(32)
+        .toString("hex");
+      console.warn(
+        "[Security] JWT_SECRET is not set in production; generated an ephemeral per-process HMAC key."
+      );
+    }
+    return globalThis.__stacklyraEphemeralJwtSecret;
+  }
+
+  return "albarka_pos_super_secret_hmac_sha256_key_2026";
+}
 
 export interface JWTPayload {
   sub: string; // userId
@@ -51,7 +72,7 @@ export function signJwt(
   const signingInput = `${encodedHeader}.${encodedPayload}`;
 
   const signature = crypto
-    .createHmac("sha256", JWT_SECRET)
+    .createHmac("sha256", getJwtSecret())
     .update(signingInput)
     .digest();
   const encodedSignature = base64UrlEncode(signature);
@@ -75,7 +96,10 @@ export function verifyJwt(token: string): JWTPayload | null {
 
     const expectedBuf = Buffer.from(
       base64UrlEncode(
-        crypto.createHmac("sha256", JWT_SECRET).update(signingInput).digest()
+        crypto
+          .createHmac("sha256", getJwtSecret())
+          .update(signingInput)
+          .digest()
       ),
       "utf-8"
     );

@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
-import { appendAuditLog } from "@/core/audit";
+import {
+  appendAuditLog,
+  DEFAULT_BRANCH_ID,
+  DEFAULT_TENANT_ID,
+} from "@/core/audit";
 import {
   assertActorPermission,
-  hasGranularPermission,
-  sanitizeUserForClient,
   tryResolveOptionalActor,
 } from "@/core/auth";
+import { buildScopedStateResponse } from "@/core/auth/state-scoper";
 import { withTransaction } from "@/core/db";
 import { toMinorUnits } from "@/core/money";
 import { sanitizeNoSqlPayload } from "@/core/validation";
-import { DatabaseSchema, getPublicMongoConfig, readDbAsync } from "@/lib/db";
+import { readDbAsync } from "@/lib/db";
 import {
   isMaskedMongoUri,
   MongoSyncSection,
@@ -17,64 +20,16 @@ import {
   pingMongoConnection,
 } from "@/lib/mongodb";
 import { StockLevelMonitorItem } from "@/lib/mock/erp-data";
-import { MongoDBConfig, PRAConfig, Product, UserProfile } from "@/lib/types";
-import { AccountingService } from "@/modules/accounting/accounting.service";
+import {
+  CashierShift,
+  MongoDBConfig,
+  PRAConfig,
+  Product,
+  UserProfile,
+} from "@/lib/types";
 import { InventoryService } from "@/modules/inventory/inventory.service";
 
 export const dynamic = "force-dynamic";
-
-function buildScopedStateResponse(
-  db: DatabaseSchema,
-  actor: UserProfile | null
-) {
-  const canViewLedger = actor
-    ? hasGranularPermission(actor.role, "accounting:ledger:view")
-    : false;
-  const canManageSettings = actor
-    ? hasGranularPermission(actor.role, "settings:pra:manage")
-    : false;
-
-  const activeParties = AccountingService.listActiveParties(db);
-  const scopedParties = canViewLedger
-    ? activeParties
-    : actor
-    ? activeParties
-        .filter((p) => p.type === "CUSTOMER")
-        .map((p) => ({
-          ...p,
-          currentBalance: 0,
-          currentBalanceMinor: 0,
-          creditLimit: 0,
-        }))
-    : [];
-
-  const visibleUsers =
-    actor?.role === "ADMIN"
-      ? db.users
-      : db.users.filter((u) => u.role !== "ADMIN");
-
-  return {
-    ...db,
-    users: visibleUsers.map((u) => sanitizeUserForClient(u, actor)),
-    mongoConfig: canManageSettings
-      ? getPublicMongoConfig(db.mongoConfig)
-      : {
-          enabled: db.mongoConfig.enabled,
-          uri: "",
-          dbName: db.mongoConfig.dbName,
-          lastStatus: "Restricted to Owner / Super Admin",
-        },
-    products: InventoryService.listActiveProducts(db),
-    parties: scopedParties,
-    ledger: canViewLedger ? db.ledger : [],
-    immutableAuditLogs: canViewLedger ? db.immutableAuditLogs : [],
-    erpInvoices: db.erpInvoices || [],
-    waitingTasks: db.waitingTasks || [],
-    stockMonitor: db.stockMonitor || [],
-    restaurantTables: db.restaurantTables || [],
-    servers: db.servers || [],
-  };
-}
 
 export async function GET() {
   const db = await readDbAsync();
@@ -314,6 +269,42 @@ export async function PUT(request: Request) {
         resolvedActor = actor;
         const target = String(body.removeServer).trim();
         txDb.servers = (txDb.servers || []).filter((s) => s !== target);
+      }
+
+      if (body.openShift) {
+        const actor = await assertActorPermission(txDb, "pos:sale:create");
+        resolvedActor = actor;
+        const floatPkr = Math.max(
+          0,
+          Number((body.openShift as { openingFloatPkr?: number }).openingFloatPkr) || 0
+        );
+        const floatMinor = toMinorUnits(floatPkr);
+        const newShift: CashierShift = {
+          id: `shift-${Date.now()}`,
+          tenantId: DEFAULT_TENANT_ID,
+          branchId: DEFAULT_BRANCH_ID,
+          openedAt: new Date().toISOString(),
+          openedBy: `${actor.name} (${actor.role})`,
+          openingFloatMinor: floatMinor,
+          cashSalesMinor: 0,
+          cardSalesMinor: 0,
+          pettyCashPayoutsMinor: 0,
+          expectedClosingCashMinor: floatMinor,
+          status: "OPEN",
+        };
+        txDb.cashierShifts = [newShift, ...(txDb.cashierShifts || [])];
+        appendAuditLog(txDb, {
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          module: "POS",
+          action: "CREATE",
+          entityType: "CashierShift",
+          entityId: newShift.id,
+          summary: `Opened register shift with PKR ${floatPkr.toLocaleString()} opening float.`,
+        });
+        touchedSections.add("CASHIER_SHIFTS");
+        touchedSections.add("IMMUTABLE_AUDIT_LOGS");
       }
 
       if (body.reconcileShift) {

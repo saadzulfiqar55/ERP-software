@@ -252,7 +252,8 @@ export function AlbarkaMaterial3ERP({
   );
   const [submittingOrder, setSubmittingOrder] = useState<boolean>(false);
 
-  // Standalone Sales Tax Calculator state
+  // Standalone Sales Tax Calculator & Shift Float state
+  const [openingFloatInput, setOpeningFloatInput] = useState<string>("0");
   const [calcAmount, setCalcAmount] = useState<number>(5000);
   const [calcTaxMode, setCalcTaxMode] = useState<"EXCLUSIVE" | "INCLUSIVE">(
     "EXCLUSIVE"
@@ -1265,6 +1266,24 @@ export function AlbarkaMaterial3ERP({
       if (data.db.immutableAuditLogs)
         setImmutableAuditLogs(data.db.immutableAuditLogs);
       notifySaved(`Updated Fiscal Period lock for ${periodKey}.`);
+    }
+  }
+
+  async function handleOpenShift(e: React.FormEvent) {
+    e.preventDefault();
+    const openingFloatPkr = Math.max(0, Number(openingFloatInput) || 0);
+    const res = await fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ openShift: { openingFloatPkr } }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      if (data.cashierShifts) setCashierShifts(data.cashierShifts);
+      if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
+      notifySaved(`Opened cashier shift with PKR ${openingFloatPkr.toLocaleString()} float.`);
+    } else {
+      notifySaved(data.error || "Failed to open cashier shift.");
     }
   }
 
@@ -2624,53 +2643,77 @@ export function AlbarkaMaterial3ERP({
                   </Card>
 
                   {/* Product Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredProducts.map((product) => (
-                      <Card
-                        key={product.id}
-                        interactive
-                        className="p-4! flex flex-col justify-between group cursor-pointer"
-                      >
-                        <div
+                  {filteredProducts.length === 0 ? (
+                    <Card className="flex flex-col items-center justify-center py-6 gap-3">
+                      <EmptyState
+                        title="No menu items available"
+                        subtitle={
+                          products.length === 0
+                            ? "Add restaurant dishes in Menu & Material Stock to start billing."
+                            : "No dishes match your active search or category filter."
+                        }
+                      />
+                      {products.length === 0 && canManageInventory && (
+                        <Button
+                          variant="filled"
                           onClick={() => {
-                            if (product.variants.length > 0) {
-                              addToCart(product, product.variants[0]);
-                            }
+                            setInventoryTab("MENU");
+                            setActiveNav("inventory");
                           }}
                         >
-                          <DishVisual
-                            product={product}
-                            canEditImage={canManageInventory}
-                            onImageUpload={handleUpdateProductImage}
-                          />
-                          <div className="mt-3 px-0.5">
-                            <div className="text-xs font-medium text-md-on-surface-variant">
-                              {product.category}
+                          Add menu dishes
+                        </Button>
+                      )}
+                    </Card>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {filteredProducts.map((product) => (
+                        <Card
+                          key={product.id}
+                          interactive
+                          className="p-4! flex flex-col justify-between group cursor-pointer"
+                        >
+                          <div
+                            onClick={() => {
+                              if (product.variants.length > 0) {
+                                addToCart(product, product.variants[0]);
+                              }
+                            }}
+                          >
+                            <DishVisual
+                              product={product}
+                              canEditImage={canManageInventory}
+                              onImageUpload={handleUpdateProductImage}
+                            />
+                            <div className="mt-3 px-0.5">
+                              <div className="text-xs font-medium text-md-on-surface-variant">
+                                {product.category}
+                              </div>
+                              <h3 className="text-base font-medium text-md-on-surface mt-0.5">
+                                {product.name}
+                              </h3>
                             </div>
-                            <h3 className="text-base font-medium text-md-on-surface mt-0.5">
-                              {product.name}
-                            </h3>
                           </div>
-                        </div>
 
-                        <div className="mt-4 pt-3 border-t border-md-divider grid grid-cols-1 gap-2">
-                          {product.variants.map((variant) => (
-                            <button
-                              key={variant.id}
-                              type="button"
-                              onClick={() => addToCart(product, variant)}
-                              className="w-full h-10 px-4 rounded-full border-0 bg-md-surface-container-low hover:bg-md-primary text-md-on-surface hover:text-md-on-primary text-xs font-medium flex items-center justify-between transition-all duration-150 hover:-translate-y-px hover:scale-[1.01] active:scale-[0.985]"
-                            >
-                              <span>{variant.name}</span>
-                              <span className="font-mono tabular-nums font-semibold">
-                                PKR {variant.price.toLocaleString()} +
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
+                          <div className="mt-4 pt-3 border-t border-md-divider grid grid-cols-1 gap-2">
+                            {product.variants.map((variant) => (
+                              <button
+                                key={variant.id}
+                                type="button"
+                                onClick={() => addToCart(product, variant)}
+                                className="w-full h-10 px-4 rounded-full border-0 bg-md-surface-container-low hover:bg-md-primary text-md-on-surface hover:text-md-on-primary text-xs font-medium flex items-center justify-between transition-all duration-150 hover:-translate-y-px hover:scale-[1.01] active:scale-[0.985]"
+                              >
+                                <span>{variant.name}</span>
+                                <span className="font-mono tabular-nums font-semibold">
+                                  PKR {variant.price.toLocaleString()} +
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* RIGHT 4 COLS: BILLING & PRA FISCALIZATION */}
@@ -2986,11 +3029,11 @@ export function AlbarkaMaterial3ERP({
                     </div>
                     <div className="pt-1 text-xs text-md-on-surface-variant flex justify-between">
                       <span>
-                        Cash (16%): PKR{" "}
+                        Cash ({praConfig.cashTaxRate}%): PKR{" "}
                         {cashComparison.grandTotal.toLocaleString()}
                       </span>
                       <span>
-                        Card (5%): PKR{" "}
+                        Card ({praConfig.cardTaxRate}%): PKR{" "}
                         {cardComparison.grandTotal.toLocaleString()}
                       </span>
                     </div>
@@ -3042,6 +3085,14 @@ export function AlbarkaMaterial3ERP({
               />
 
               <Card className="p-0! overflow-hidden">
+                {orders.length === 0 ? (
+                  <div className="p-6">
+                    <EmptyState
+                      title="No sales orders yet"
+                      subtitle="Complete a sale in POS Terminal to see orders, tax breakdowns, and PRA receipts here."
+                    />
+                  </div>
+                ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead>
@@ -3096,6 +3147,7 @@ export function AlbarkaMaterial3ERP({
                     </tbody>
                   </table>
                 </div>
+                )}
               </Card>
             </div>
           )}
@@ -3878,7 +3930,7 @@ export function AlbarkaMaterial3ERP({
             <div className="space-y-6">
               <PageHeader
                 title="Reports, Z-closing & PRA tax simulator"
-                subtitle="Shift drawer reconciliation, fiscal period locking, and Cash (16%) vs Card (5%) tax calculator"
+                subtitle={`Shift drawer reconciliation, fiscal period locking, and Cash (${praConfig.cashTaxRate}%) vs Card (${praConfig.cardTaxRate}%) tax calculator`}
               />
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -3886,12 +3938,15 @@ export function AlbarkaMaterial3ERP({
                 <Card className="lg:col-span-6 space-y-4">
                   <div className="flex items-center justify-between">
                     <h2 className="text-base font-semibold text-md-on-surface">
-                      Cashier shift & drawer reconciliation
+                      Cashier shift &amp; drawer reconciliation
                     </h2>
-                    <StatusChip label="Shift OPEN" variant="success" />
+                    <StatusChip
+                      label={cashierShifts[0] ? `Shift ${cashierShifts[0].status}` : "No Shift Open"}
+                      variant={cashierShifts[0] ? "success" : "neutral"}
+                    />
                   </div>
 
-                  {cashierShifts[0] && (
+                  {cashierShifts[0] ? (
                     <div className="space-y-4">
                       <div className="grid grid-cols-3 gap-3 text-sm">
                         <div className="p-3.5 rounded-2xl bg-md-surface-container-low">
@@ -3944,6 +3999,25 @@ export function AlbarkaMaterial3ERP({
                         </Button>
                       </form>
                     </div>
+                  ) : (
+                    <form onSubmit={handleOpenShift} className="space-y-4">
+                      <p className="text-xs text-md-on-surface-variant">
+                        No cashier register shift is open yet. Enter an opening cash drawer float to track register sales and Z-closing variance.
+                      </p>
+                      <div className="flex items-end gap-3">
+                        <div className="flex-1">
+                          <OutlinedTextField
+                            label="Opening float (PKR)"
+                            type="number"
+                            value={openingFloatInput}
+                            onChange={setOpeningFloatInput}
+                          />
+                        </div>
+                        <Button type="submit" variant="filled" size="lg">
+                          Open shift
+                        </Button>
+                      </div>
+                    </form>
                   )}
                 </Card>
 
@@ -4003,6 +4077,47 @@ export function AlbarkaMaterial3ERP({
                     );
                   })()}
                 </Card>
+
+                {/* Fiscal Period Lock Management (Super Admin) */}
+                {canViewLedger && (
+                  <Card className="lg:col-span-12 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="text-base font-semibold text-md-on-surface">
+                          Fiscal period locks
+                        </h2>
+                        <p className="text-xs text-md-on-surface-variant mt-0.5">
+                          Locking a fiscal month blocks backdated POS bills, vouchers, and reversals in that period.
+                        </p>
+                      </div>
+                      <StatusChip label={`${fiscalPeriods.length} periods`} variant="primary" />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {fiscalPeriods.map((fp) => (
+                        <div
+                          key={fp.periodKey}
+                          className="p-3.5 rounded-xl bg-md-surface-container-low flex items-center justify-between gap-3"
+                        >
+                          <div>
+                            <div className="text-sm font-medium text-md-on-surface">
+                              {fp.label}
+                            </div>
+                            <div className="text-xs font-mono text-md-on-surface-variant">
+                              {fp.periodKey} · {fp.isLocked ? `Locked by ${fp.lockedBy || "Admin"}` : "Open for postings"}
+                            </div>
+                          </div>
+                          <Button
+                            variant={fp.isLocked ? "tonal" : "outlined"}
+                            size="sm"
+                            onClick={() => void handleToggleFiscalPeriod(fp.periodKey)}
+                          >
+                            {fp.isLocked ? "Unlock period" : "Lock period"}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
               </div>
             </div>
           )}
@@ -4046,7 +4161,18 @@ export function AlbarkaMaterial3ERP({
                     <h2 className="text-base font-semibold text-md-on-surface">
                       Punjab Revenue Authority (PRA) e-IMS fiscal parameters
                     </h2>
-                    <StatusChip label="Connected (Code 100)" variant="success" />
+                    <StatusChip
+                      label={
+                        praConfig.praLiveMode && praConfig.posId && praConfig.apiToken
+                          ? "Live e-IMS Configured"
+                          : "Local Fiscal / Sandbox"
+                      }
+                      variant={
+                        praConfig.praLiveMode && praConfig.posId && praConfig.apiToken
+                          ? "success"
+                          : "warning"
+                      }
+                    />
                   </div>
                   <form onSubmit={handleSavePraConfig} className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

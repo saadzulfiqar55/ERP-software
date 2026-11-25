@@ -106,7 +106,22 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
             <div>
               <div className="font-medium text-md-on-surface text-base flex items-center gap-2">
                 <span>Invoice {order.invoiceNumber}</span>
-                <StatusChip label="PRA Fiscalized" variant="success" />
+                <StatusChip
+                  label={
+                    order.praSyncStatus === "PENDING_OFFLINE"
+                      ? "Offline · Pending PRA"
+                      : order.praSyncStatus === "FAILED"
+                      ? "PRA Sync Failed"
+                      : "PRA Fiscalized"
+                  }
+                  variant={
+                    order.praSyncStatus === "PENDING_OFFLINE"
+                      ? "warning"
+                      : order.praSyncStatus === "FAILED"
+                      ? "error"
+                      : "success"
+                  }
+                />
               </div>
               <div className="text-xs font-mono text-md-on-surface-variant">
                 PRA Fiscal Invoice #: {order.praInvoiceNumber}

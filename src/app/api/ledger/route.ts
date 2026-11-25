@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { appendAuditLog, DEFAULT_BRANCH_ID, DEFAULT_TENANT_ID } from "@/core/audit";
 import { assertActorPermission } from "@/core/auth";
+import { buildScopedStateResponse } from "@/core/auth/state-scoper";
 import { withTransaction } from "@/core/db";
 import { lookupIdempotencyRecord, storeIdempotencyRecord } from "@/core/idempotency";
 import { toMinorUnits } from "@/core/money";
 import { sanitizeNoSqlPayload } from "@/core/validation";
-import { PartyAccount } from "@/lib/types";
+import { PartyAccount, UserProfile } from "@/lib/types";
 import { AccountingService } from "@/modules/accounting/accounting.service";
-import { InventoryService } from "@/modules/inventory/inventory.service";
 
 export async function POST(request: Request) {
   try {
@@ -15,14 +15,17 @@ export async function POST(request: Request) {
     const body = sanitizeNoSqlPayload(rawBody);
     const idempotencyKey = body.idempotencyKey as string | undefined;
 
+    let actorRef: UserProfile | null = null;
+
     const { result, db } = await withTransaction(async (txDb) => {
+      // Strictly Owner / Super Admin ONLY for all Ledger / Khata operations
+      const actor = await assertActorPermission(txDb, "accounting:ledger:view");
+      actorRef = actor;
+
       const cached = lookupIdempotencyRecord(txDb, idempotencyKey, "LEDGER_MUTATION");
       if (cached) {
         return cached.responseBody;
       }
-
-      // Strictly Owner / Super Admin ONLY for all Ledger / Khata operations
-      const actor = await assertActorPermission(txDb, "accounting:ledger:view");
 
       // 1. Toggle Fiscal Period Lock (`accounting:period:close`)
       if (body.action === "TOGGLE_FISCAL_PERIOD") {
@@ -215,11 +218,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ...((result as object) || {}),
-      db: {
-        ...db,
-        products: InventoryService.listActiveProducts(db),
-        parties: AccountingService.listActiveParties(db),
-      },
+      db: buildScopedStateResponse(db, actorRef),
     });
   } catch (err) {
     const message =

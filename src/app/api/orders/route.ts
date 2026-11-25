@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { assertActorPermission } from "@/core/auth";
+import { buildScopedStateResponse } from "@/core/auth/state-scoper";
 import { withTransaction } from "@/core/db";
 import { lookupIdempotencyRecord, storeIdempotencyRecord } from "@/core/idempotency";
 import { sanitizeNoSqlPayload } from "@/core/validation";
-import { InventoryService } from "@/modules/inventory/inventory.service";
-import { AccountingService } from "@/modules/accounting/accounting.service";
+import { UserProfile } from "@/lib/types";
 import { POSService } from "@/modules/pos/pos.service";
 
 export async function POST(request: Request) {
@@ -13,8 +13,14 @@ export async function POST(request: Request) {
     const body = sanitizeNoSqlPayload(rawBody);
     const idempotencyKey = body.idempotencyKey as string | undefined;
 
+    let actorRef: UserProfile | null = null;
+
     const { result, db } = await withTransaction(async (txDb) => {
-      // 1. Check Idempotency Lock first
+      // Verify Granular RBAC Permission (`pos:sale:create`) before returning cached idempotency too
+      const actor = await assertActorPermission(txDb, "pos:sale:create");
+      actorRef = actor;
+
+      // 1. Check Idempotency Lock
       const cached = lookupIdempotencyRecord(txDb, idempotencyKey, "POS_ORDER_CREATE");
       if (cached) {
         return cached.responseBody as ReturnType<
@@ -22,13 +28,10 @@ export async function POST(request: Request) {
         >;
       }
 
-      // 2. Verify Granular RBAC Permission (`pos:sale:create`)
-      const actor = await assertActorPermission(txDb, "pos:sale:create");
-
-      // 3. Execute Domain Service inside ACID transaction
+      // 2. Execute Domain Service inside ACID transaction
       const saleResult = POSService.completeSaleTransaction(txDb, body, actor);
 
-      // 4. Record Idempotency Key
+      // 3. Record Idempotency Key
       storeIdempotencyRecord(txDb, idempotencyKey, "POS_ORDER_CREATE", 200, saleResult);
 
       return saleResult;
@@ -37,16 +40,16 @@ export async function POST(request: Request) {
     return NextResponse.json({
       order: result.order,
       praPayload: result.praPayload,
-      db: {
-        ...db,
-        products: InventoryService.listActiveProducts(db),
-        parties: AccountingService.listActiveParties(db),
-      },
+      db: buildScopedStateResponse(db, actorRef),
     });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to complete POS transaction" },
-      { status: 400 }
-    );
+    const message =
+      err instanceof Error ? err.message : "Failed to complete POS transaction";
+    const status = message.includes("Access Denied")
+      ? 403
+      : message.includes("Authentication required")
+      ? 401
+      : 400;
+    return NextResponse.json({ error: message }, { status });
   }
 }

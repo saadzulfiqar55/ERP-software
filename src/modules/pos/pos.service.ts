@@ -1,22 +1,25 @@
 import { appendAuditLog, DEFAULT_BRANCH_ID, DEFAULT_TENANT_ID } from "@/core/audit";
+import { hasGranularPermission } from "@/core/auth";
 import { nextSequentialNumber } from "@/core/db";
 import { assertBalancedJournal, toMinorUnits } from "@/core/money";
 import { DatabaseSchema } from "@/lib/db";
 import { buildPRAPayload, generatePRAInvoiceResponse } from "@/lib/pra-client";
-import { CartItem, DoubleEntryLine, Order, UserProfile } from "@/lib/types";
+import { calculateSalesTax } from "@/lib/tax-calculator";
+import { CartItem, DoubleEntryLine, Order, PaymentMethod, UserProfile } from "@/lib/types";
 import { AccountingService } from "../accounting/accounting.service";
 import { InventoryService } from "../inventory/inventory.service";
 
 export const POSService = {
   /**
    * Executes a complete POS Sale inside an ACID Transaction:
-   * 1. Verifies Fiscal Period is OPEN
-   * 2. Generates atomic sequential Invoice Number & USIN (`DocumentCounters`)
-   * 3. Atomically deducts retail stock (`InventoryService.deductStockAtomic`)
-   * 4. Snapshots historical unitCost & taxRate onto every line item
-   * 5. Verifies Double-Entry Accounting balance (`Sum Debits === Sum Credits`)
-   * 6. Updates Customer Khata Ledger (if Credit Sale) & Cashier Shift register totals
-   * 7. Logs an immutable AuditLog entry
+   * 1. Verifies Fiscal Period is OPEN and item list is valid
+   * 2. Enforces `pos:discount:override` RBAC for discounts & resolves authoritative catalog prices
+   * 3. Generates atomic sequential Invoice Number & USIN (`DocumentCounters`)
+   * 4. Atomically deducts retail stock (`InventoryService.deductStockAtomic`)
+   * 5. Computes authoritative server-side tax breakdown & snapshots historical unitCost/taxRate
+   * 6. Verifies Double-Entry Accounting balance (`Sum Debits === Sum Credits`)
+   * 7. Updates Customer Khata Ledger (if Credit Sale) & Cashier Shift register totals
+   * 8. Logs an immutable AuditLog entry
    */
   completeSaleTransaction(
     txDb: DatabaseSchema,
@@ -24,6 +27,21 @@ export const POSService = {
     body: any,
     actor: UserProfile
   ) {
+    const rawItems = Array.isArray(body.items) ? (body.items as CartItem[]) : [];
+    if (rawItems.length === 0) {
+      throw new Error("POS order must include at least one item.");
+    }
+
+    const requestedDiscount = Math.max(0, Number(body.discountAmount) || 0);
+    if (
+      requestedDiscount > 0 &&
+      !hasGranularPermission(actor.role, "pos:discount:override")
+    ) {
+      throw new Error(
+        `RBAC Access Denied: "${actor.role}" lacks "pos:discount:override" permission to apply bill discounts.`
+      );
+    }
+
     const createdAt = new Date().toISOString();
     AccountingService.assertFiscalPeriodOpen(txDb, createdAt);
 
@@ -31,21 +49,41 @@ export const POSService = {
     const invoiceNumber = nextSequentialNumber(txDb, "INVOICE", "ALB", year);
     const usin = nextSequentialNumber(txDb, "USIN", "USIN", year);
 
-    // Snapshot historical costPrice and taxRate onto each order line item
+    const paymentMethod = (body.paymentMethod || "CASH") as PaymentMethod;
+
+    // Resolve authoritative prices & taxMode from catalog, snapshotting unitCost & taxRate
     const appliedRate =
-      body.paymentMethod === "CARD" || body.paymentMethod === "JAZZCASH_EASYPAISA"
+      paymentMethod === "CARD" || paymentMethod === "JAZZCASH_EASYPAISA"
         ? txDb.praConfig.cardTaxRate
         : txDb.praConfig.cashTaxRate;
 
-    const snapshottedItems: CartItem[] = (body.items as CartItem[]).map((item) => {
+    const snapshottedItems: CartItem[] = rawItems.map((item) => {
+      const qty = Math.max(1, Math.round(Number(item.quantity) || 0));
       const catalogProd = txDb.products.find((p) => p.id === item.productId);
       const catalogVar = catalogProd?.variants.find((v) => v.id === item.variantId);
+      const authoritativePrice = catalogVar?.price ?? Math.max(0, Number(item.unitPrice) || 0);
+      const authoritativeTaxMode = catalogProd?.taxMode ?? item.taxMode;
+
       return {
         ...item,
-        unitCostSnapshot: catalogVar?.costPrice ?? Math.round(item.unitPrice * 0.6),
-        taxRateSnapshot: item.taxMode === "EXEMPT" ? 0 : appliedRate,
+        quantity: qty,
+        unitPrice: authoritativePrice,
+        taxMode: authoritativeTaxMode,
+        unitCostSnapshot:
+          catalogVar?.costPrice ?? Math.round(authoritativePrice * 0.6),
+        taxRateSnapshot: authoritativeTaxMode === "EXEMPT" ? 0 : appliedRate,
       };
     });
+
+    // Recompute authoritative server-side tax breakdown (never trust client grandTotal)
+    const serverTaxBreakdown = calculateSalesTax(
+      snapshottedItems,
+      paymentMethod,
+      requestedDiscount,
+      txDb.praConfig,
+      Boolean(body.serviceCharge && Number(body.serviceCharge) > 0),
+      typeof body.splitCashRatio === "number" ? body.splitCashRatio : 0.5
+    );
 
     // Atomic Inventory Deduction (throws InsufficientStockError if stock < requested)
     InventoryService.deductStockAtomic(txDb, snapshottedItems, actor);
@@ -69,15 +107,15 @@ export const POSService = {
       buyerNtnCnic: body.buyerNtnCnic || "",
       khataAccountId: body.khataAccountId,
       items: snapshottedItems,
-      discountAmount: body.discountAmount || 0,
-      serviceCharge: body.serviceCharge || 0,
-      paymentMethod: body.paymentMethod,
-      cashPaid: body.cashPaid || 0,
-      cardPaid: body.cardPaid || 0,
-      changeReturned: body.changeReturned || 0,
+      discountAmount: serverTaxBreakdown.discountAmount,
+      serviceCharge: serverTaxBreakdown.serviceCharge,
+      paymentMethod,
+      cashPaid: Math.max(0, Number(body.cashPaid) || 0),
+      cardPaid: Math.max(0, Number(body.cardPaid) || 0),
+      changeReturned: Math.max(0, Number(body.changeReturned) || 0),
       taxBreakdown: {
-        ...body.taxBreakdown,
-        grandTotalMinor: toMinorUnits(body.taxBreakdown.grandTotal),
+        ...serverTaxBreakdown,
+        grandTotalMinor: toMinorUnits(serverTaxBreakdown.grandTotal),
       },
       cashierName: `${actor.name} (${actor.role})`,
     };

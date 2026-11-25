@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { sanitizeUserForClient } from "@/core/auth";
+import { sanitizeNoSqlPayload } from "@/core/validation";
 import { readDbAsync, writeDbAsync } from "@/lib/db";
 import { signJwt, verifyJwt } from "@/lib/auth-jwt";
 import { timingSafeEqualStrings, verifyPassword } from "@/lib/password";
@@ -98,7 +99,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const rawBody = await request.json();
+    const body = sanitizeNoSqlPayload(rawBody);
     const db = await readDbAsync();
     const cookieStore = await cookies();
 
