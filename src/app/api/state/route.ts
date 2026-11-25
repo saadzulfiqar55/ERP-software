@@ -10,7 +10,13 @@ import { withTransaction } from "@/core/db";
 import { toMinorUnits } from "@/core/money";
 import { sanitizeNoSqlPayload } from "@/core/validation";
 import { DatabaseSchema, getPublicMongoConfig, readDbAsync } from "@/lib/db";
-import { isMaskedMongoUri, normalizeMongoUri, pingMongoConnection } from "@/lib/mongodb";
+import {
+  isMaskedMongoUri,
+  MongoSyncSection,
+  normalizeMongoUri,
+  pingMongoConnection,
+} from "@/lib/mongodb";
+import { StockLevelMonitorItem } from "@/lib/mock/erp-data";
 import { MongoDBConfig, PRAConfig, Product, UserProfile } from "@/lib/types";
 import { AccountingService } from "@/modules/accounting/accounting.service";
 import { InventoryService } from "@/modules/inventory/inventory.service";
@@ -65,6 +71,8 @@ function buildScopedStateResponse(
     erpInvoices: db.erpInvoices || [],
     waitingTasks: db.waitingTasks || [],
     stockMonitor: db.stockMonitor || [],
+    restaurantTables: db.restaurantTables || [],
+    servers: db.servers || [],
   };
 }
 
@@ -80,6 +88,7 @@ export async function PUT(request: Request) {
     const body = sanitizeNoSqlPayload(rawBody);
 
     let resolvedActor: UserProfile | null = null;
+    const touchedSections = new Set<MongoSyncSection>();
 
     const { db } = await withTransaction(async (txDb) => {
       if (body.praConfig) {
@@ -99,6 +108,7 @@ export async function PUT(request: Request) {
           entityId: txDb.praConfig.posId,
           summary: `Updated PRA e-IMS parameters (Cash GST: ${txDb.praConfig.cashTaxRate}%, Card GST: ${txDb.praConfig.cardTaxRate}%).`,
         });
+        touchedSections.add("IMMUTABLE_AUDIT_LOGS");
       }
 
       if (body.mongoConfig) {
@@ -143,6 +153,8 @@ export async function PUT(request: Request) {
           false,
           actor
         );
+        touchedSections.add("PRODUCTS");
+        touchedSections.add("IMMUTABLE_AUDIT_LOGS");
       }
 
       if (body.editProduct) {
@@ -154,6 +166,8 @@ export async function PUT(request: Request) {
           true,
           actor
         );
+        touchedSections.add("PRODUCTS");
+        touchedSections.add("IMMUTABLE_AUDIT_LOGS");
       }
 
       if (body.deleteProductId) {
@@ -165,6 +179,8 @@ export async function PUT(request: Request) {
           body.deleteProductId as string,
           actor
         );
+        touchedSections.add("PRODUCTS");
+        touchedSections.add("IMMUTABLE_AUDIT_LOGS");
       }
 
       if (body.updateProductImage) {
@@ -177,6 +193,127 @@ export async function PUT(request: Request) {
         txDb.products = txDb.products.map((p) =>
           p.id === productId ? { ...p, imageUrl } : p
         );
+        touchedSections.add("PRODUCTS");
+      }
+
+      // Material Stock CRUD (separated from Restaurant Menu)
+      if (body.addStockItem) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
+        const item = body.addStockItem as StockLevelMonitorItem;
+        const cleanItem: StockLevelMonitorItem = {
+          id: item.id || `stk-${Date.now()}`,
+          name: String(item.name || "").trim(),
+          sku: String(item.sku || "").trim() || `MAT-${Date.now().toString().slice(-4)}`,
+          currentQty: Math.max(0, Number(item.currentQty) || 0),
+          reorderTarget: Math.max(1, Number(item.reorderTarget) || 10),
+          unit: String(item.unit || "Units").trim() || "Units",
+        };
+        if (!cleanItem.name) throw new Error("Material name is required.");
+        txDb.stockMonitor = [cleanItem, ...(txDb.stockMonitor || [])];
+        appendAuditLog(txDb, {
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          module: "INVENTORY",
+          action: "CREATE",
+          entityType: "MaterialStock",
+          entityId: cleanItem.id,
+          summary: `Added material stock "${cleanItem.name}" (${cleanItem.currentQty} ${cleanItem.unit}).`,
+        });
+        touchedSections.add("IMMUTABLE_AUDIT_LOGS");
+      }
+
+      if (body.editStockItem) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
+        const updated = body.editStockItem as StockLevelMonitorItem;
+        txDb.stockMonitor = (txDb.stockMonitor || []).map((s) =>
+          s.id === updated.id
+            ? {
+                ...s,
+                name: String(updated.name || s.name).trim(),
+                sku: String(updated.sku || s.sku).trim(),
+                currentQty: Math.max(0, Number(updated.currentQty) || 0),
+                reorderTarget: Math.max(1, Number(updated.reorderTarget) || 1),
+                unit: String(updated.unit || s.unit).trim() || "Units",
+              }
+            : s
+        );
+      }
+
+      if (body.adjustStockQty) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
+        const { stockId, delta } = body.adjustStockQty as {
+          stockId: string;
+          delta: number;
+        };
+        txDb.stockMonitor = (txDb.stockMonitor || []).map((s) =>
+          s.id === stockId
+            ? { ...s, currentQty: Math.max(0, s.currentQty + Number(delta || 0)) }
+            : s
+        );
+      }
+
+      if (body.deleteStockId) {
+        const actor = await assertActorPermission(txDb, "inventory:archive");
+        resolvedActor = actor;
+        const stockId = String(body.deleteStockId);
+        const existing = (txDb.stockMonitor || []).find((s) => s.id === stockId);
+        txDb.stockMonitor = (txDb.stockMonitor || []).filter((s) => s.id !== stockId);
+        if (existing) {
+          appendAuditLog(txDb, {
+            actorId: actor.id,
+            actorName: actor.name,
+            actorRole: actor.role,
+            module: "INVENTORY",
+            action: "SOFT_ARCHIVE",
+            entityType: "MaterialStock",
+            entityId: stockId,
+            summary: `Removed material stock item "${existing.name}".`,
+          });
+          touchedSections.add("IMMUTABLE_AUDIT_LOGS");
+        }
+      }
+
+      // Dynamic Restaurant Tables & Servers CRUD
+      if (body.addTable) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
+        const tableName = String(body.addTable).trim();
+        if (!tableName) throw new Error("Table name cannot be empty.");
+        const current = txDb.restaurantTables || [];
+        if (!current.includes(tableName)) {
+          txDb.restaurantTables = [...current, tableName];
+        }
+      }
+
+      if (body.removeTable) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
+        const target = String(body.removeTable).trim();
+        txDb.restaurantTables = (txDb.restaurantTables || []).filter(
+          (t) => t !== target
+        );
+      }
+
+      if (body.addServer) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
+        const serverName = String(body.addServer).trim();
+        if (!serverName) throw new Error("Server name cannot be empty.");
+        const current = txDb.servers || [];
+        if (!current.includes(serverName)) {
+          txDb.servers = [...current, serverName];
+        }
+      }
+
+      if (body.removeServer) {
+        const actor = await assertActorPermission(txDb, "inventory:adjust");
+        resolvedActor = actor;
+        const target = String(body.removeServer).trim();
+        txDb.servers = (txDb.servers || []).filter((s) => s !== target);
       }
 
       if (body.reconcileShift) {
@@ -204,6 +341,8 @@ export async function PUT(request: Request) {
             entityId: shift.id,
             summary: `Reconciled cashier shift drawer (Counted: PKR ${countedCashPkr.toLocaleString()}).`,
           });
+          touchedSections.add("CASHIER_SHIFTS");
+          touchedSections.add("IMMUTABLE_AUDIT_LOGS");
         }
       }
 
@@ -232,6 +371,7 @@ export async function PUT(request: Request) {
           entityId: taskId,
           summary: `Approved ${targetTask.referenceCode}: ${targetTask.title}.`,
         });
+        touchedSections.add("IMMUTABLE_AUDIT_LOGS");
       }
 
       if (body.reorderStockId) {
@@ -255,10 +395,11 @@ export async function PUT(request: Request) {
           entityId: stockId,
           summary: `Restocked "${item.name}" to ${item.reorderTarget} ${item.unit}.`,
         });
+        touchedSections.add("IMMUTABLE_AUDIT_LOGS");
       }
 
       return true;
-    }, ["PRODUCTS", "CASHIER_SHIFTS", "IMMUTABLE_AUDIT_LOGS"]);
+    }, Array.from(touchedSections));
 
     const actorForResponse =
       resolvedActor || (await tryResolveOptionalActor(db));

@@ -102,7 +102,7 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     label: "People & HR",
     href: "/hr",
     iconName: "Users",
-    permission: "accounting:ledger:view",
+    permission: "inventory:adjust",
     section: "PRIMARY",
   },
   {

@@ -66,6 +66,18 @@ export const ERP_VERSION_POLICY = {
 
 export const ERP_RELEASES: ReleaseNoteItem[] = [
   {
+    version: "v0.5.3",
+    stage: ERP_RELEASE_STAGE,
+    summary:
+      "Instant optimistic CRUD, offline queue resilience, clean POS cart, separated Menu vs Material Stock, and dynamic Tables/Servers & Staff management.",
+    highlights: [
+      "Emptied default POS cart & added live Add/Remove controls for dining tables and servers",
+      "Separated Restaurant Menu (stock-free) from Material Stock CRUD in Inventory",
+      "Added People, Staff & Floor Team workspace for Manager/Cashier PIN profiles and servers",
+      "Added 15s server warm-cache, minimal Mongo sync sections, localStorage cache & offline sync queue",
+    ],
+  },
+  {
     version: "v0.5.2",
     stage: ERP_RELEASE_STAGE,
     summary:

@@ -129,7 +129,7 @@ export async function POST(request: Request) {
         .replace(/[^a-z0-9._-]/g, "");
       const role = String(body.role || "CASHIER").toUpperCase() as UserRole;
       const title = String(body.title || "").trim();
-      const email = String(body.email || "").trim().toLowerCase();
+      const rawEmail = String(body.email || "").trim().toLowerCase();
       const pin = String(body.pin || "").trim();
       const password = String(body.password || "");
 
@@ -139,13 +139,15 @@ export async function POST(request: Request) {
       if (!["ADMIN", "MANAGER", "CASHIER"].includes(role)) {
         throw new Error("Invalid role. Allowed roles: ADMIN, MANAGER, CASHIER.");
       }
-      if (!email || !email.includes("@")) {
-        throw new Error("Provide a valid work email address.");
-      }
 
-      const resolvedUsername = username || email.split("@")[0];
+      const fallbackSlug = name.toLowerCase().replace(/[^a-z0-9]/g, "") || `staff${Date.now().toString().slice(-4)}`;
+      const resolvedUsername = username || (rawEmail ? rawEmail.split("@")[0] : fallbackSlug);
       if (!resolvedUsername || resolvedUsername.length < 2) {
         throw new Error("Username must be at least 2 characters.");
+      }
+      const email = rawEmail || `${resolvedUsername}@stacklyra.local`;
+      if (!email.includes("@")) {
+        throw new Error("Provide a valid work email address.");
       }
 
       if (role === "ADMIN") {

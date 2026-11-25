@@ -61,6 +61,8 @@ export interface DatabaseSchema {
   fiscalPeriods: FiscalPeriod[];
   waitingTasks?: WaitingTaskItem[];
   stockMonitor?: StockLevelMonitorItem[];
+  restaurantTables?: string[];
+  servers?: string[];
 }
 
 const IS_SERVERLESS = Boolean(
@@ -167,6 +169,8 @@ function buildDefaults(): DatabaseSchema {
     fiscalPeriods: DEFAULT_FISCAL_PERIODS,
     waitingTasks: INITIAL_WAITING_TASKS,
     stockMonitor: INITIAL_STOCK_MONITOR,
+    restaurantTables: [],
+    servers: [],
   };
 }
 
@@ -229,6 +233,8 @@ function mergeWithDefaults(
         : defaults.fiscalPeriods,
     waitingTasks: parsed.waitingTasks ?? defaults.waitingTasks,
     stockMonitor: parsed.stockMonitor ?? defaults.stockMonitor,
+    restaurantTables: parsed.restaurantTables ?? defaults.restaurantTables,
+    servers: parsed.servers ?? defaults.servers,
   };
 }
 
@@ -262,11 +268,26 @@ export function writeDb(data: DatabaseSchema): void {
   }
 }
 
+declare global {
+  // Short-lived per-instance warm cache to avoid repeated remote MongoDB snapshot reads on rapid CRUD bursts
+  // eslint-disable-next-line no-var
+  var __stacklyraWarmDb:
+    | { snapshot: DatabaseSchema; cachedAt: number }
+    | undefined;
+}
+
+const WARM_CACHE_TTL_MS = 15_000;
+
 /**
  * MongoDB-first async state loader for serverless deployments (Vercel) and local Node.
  * Falls back transparently to local JSON store if MongoDB is disabled or unreachable.
  */
 export async function readDbAsync(): Promise<DatabaseSchema> {
+  const warm = globalThis.__stacklyraWarmDb;
+  if (warm && Date.now() - warm.cachedAt < WARM_CACHE_TTL_MS) {
+    return warm.snapshot;
+  }
+
   const envMongo = getEnvMongoConfig();
   const localSnapshot = readDb();
   const activeMongo =
@@ -282,13 +303,22 @@ export async function readDbAsync(): Promise<DatabaseSchema> {
       activeMongo.dbName
     );
     if (remote) {
-      return mergeWithDefaults(remote, {
+      const merged = mergeWithDefaults(remote, {
         ...activeMongo,
         lastStatus: `MongoDB Atlas Connected (isolated DB: ${activeMongo.dbName})`,
       });
+      globalThis.__stacklyraWarmDb = {
+        snapshot: merged,
+        cachedAt: Date.now(),
+      };
+      return merged;
     }
   }
 
+  globalThis.__stacklyraWarmDb = {
+    snapshot: localSnapshot,
+    cachedAt: Date.now(),
+  };
   return localSnapshot;
 }
 
@@ -299,6 +329,10 @@ export async function writeDbAsync(
   data: DatabaseSchema,
   sections?: MongoSyncSection[]
 ): Promise<void> {
+  globalThis.__stacklyraWarmDb = {
+    snapshot: data,
+    cachedAt: Date.now(),
+  };
   writeDb(data);
   if (data.mongoConfig?.enabled && data.mongoConfig?.uri) {
     await syncSnapshotToMongoIfAvailable(

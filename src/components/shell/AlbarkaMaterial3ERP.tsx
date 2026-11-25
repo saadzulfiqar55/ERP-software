@@ -77,6 +77,7 @@ import {
   NavItem,
   OutlinedTextField,
   PageHeader,
+  ProgressBar,
   SearchBar,
   SegmentedButton,
   Snackbar,
@@ -132,24 +133,16 @@ const EMPTY_PRA_CONFIG: PRAConfig = {
   praLiveMode: false,
 };
 
-const RESTAURANT_TABLES = [
-  "Main Hall - T1",
-  "Main Hall - T2",
-  "Main Hall - T3",
-  "Family Hall - T4",
-  "Family Hall - T5",
-  "VIP Family Cabin - C1",
-  "Outdoor Dera - D1",
-  "Outdoor Dera - D2",
-];
+const WORKSPACE_CACHE_KEY = "stacklyra_workspace_cache_v1";
+const SYNC_QUEUE_KEY = "stacklyra_sync_queue_v1";
 
-const WAITERS = [
-  "Muhammad Asif",
-  "Rana Dilawar",
-  "Irfan Khan",
-  "Sajid Mehmood",
-  "Counter Self",
-];
+interface QueuedMutation {
+  id: string;
+  url: string;
+  method: "POST" | "PUT";
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
 
 const QUICK_CHEF_NOTES = [
   "Desi Ghee",
@@ -214,12 +207,17 @@ export function AlbarkaMaterial3ERP({
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [waitingTasks, setWaitingTasks] = useState<WaitingTaskItem[]>([]);
   const [stockMonitor, setStockMonitor] = useState<StockLevelMonitorItem[]>([]);
+  const [restaurantTables, setRestaurantTables] = useState<string[]>([]);
+  const [servers, setServers] = useState<string[]>([]);
   const [immutableAuditLogs, setImmutableAuditLogs] = useState<
     ImmutableAuditLog[]
   >([]);
   const [cashierShifts, setCashierShifts] = useState<CashierShift[]>([]);
   const [fiscalPeriods, setFiscalPeriods] = useState<FiscalPeriod[]>([]);
   const [countedCashInput, setCountedCashInput] = useState<string>("");
+  const [isOnline, setIsOnline] = useState<boolean>(true);
+  const [syncQueue, setSyncQueue] = useState<QueuedMutation[]>([]);
+  const [syncingQueue, setSyncingQueue] = useState<boolean>(false);
 
   // POS Filters & Search
   const [segmentFilter, setSegmentFilter] = useState<"ALL" | BusinessSegment>(
@@ -229,59 +227,18 @@ export function AlbarkaMaterial3ERP({
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [barcodeInput, setBarcodeInput] = useState<string>("");
 
-  // Active Order State
+  // Active Order State (Clean Empty Cart & Dynamic Floor Lists)
   const [orderType, setOrderType] = useState<OrderType>("DINE_IN");
-  const [tableNumber, setTableNumber] = useState<string>(RESTAURANT_TABLES[3]);
-  const [waiterName, setWaiterName] = useState<string>(WAITERS[0]);
+  const [tableNumber, setTableNumber] = useState<string>("");
+  const [waiterName, setWaiterName] = useState<string>("");
+  const [manageFloorOpen, setManageFloorOpen] = useState<boolean>(false);
+  const [newTableInput, setNewTableInput] = useState<string>("");
+  const [newServerInput, setNewServerInput] = useState<string>("");
   const [customerName, setCustomerName] = useState<string>("");
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [buyerNtnCnic] = useState<string>("");
   const [selectedKhataId, setSelectedKhataId] = useState<string>("");
-  const [cart, setCart] = useState<CartItem[]>([
-    {
-      cartItemId: "init-1",
-      productId: "prod-101",
-      code: "101",
-      name: "Albarka Special Mutton Karahi",
-      nameUrdu: "",
-      segment: "RESTAURANT",
-      kitchenStation: "KARAHI_HANDI",
-      variantId: "v-101-full",
-      variantName: "Full (1 Kg)",
-      unitPrice: 3800,
-      quantity: 1,
-      taxMode: "EXCLUSIVE",
-      notes: "Desi Ghee",
-    },
-    {
-      cartItemId: "init-2",
-      productId: "prod-401",
-      code: "401",
-      name: "Roghni / Garlic Kalonji Naan",
-      nameUrdu: "",
-      segment: "RESTAURANT",
-      kitchenStation: "TANDOOR",
-      variantId: "v-401-reg",
-      variantName: "Roghni Naan",
-      unitPrice: 110,
-      quantity: 4,
-      taxMode: "EXCLUSIVE",
-    },
-    {
-      cartItemId: "init-3",
-      productId: "prod-501",
-      code: "501",
-      name: "Desi Ghee Habshi Halwa Box",
-      nameUrdu: "",
-      segment: "RETAIL",
-      kitchenStation: "SWEET_RETAIL",
-      variantId: "v-501-500g",
-      variantName: "500g Pack",
-      unitPrice: 950,
-      quantity: 1,
-      taxMode: "INCLUSIVE",
-    },
-  ]);
+  const [cart, setCart] = useState<CartItem[]>([]);
 
   // Billing & Tax Controls
   const [discountAmount, setDiscountAmount] = useState<number>(0);
@@ -332,15 +289,22 @@ export function AlbarkaMaterial3ERP({
 
   // New / Edit Product Form
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  // Separated Menu vs Material Stock state
+  const [inventoryTab, setInventoryTab] = useState<"MENU" | "STOCK">("MENU");
   const [newProdName, setNewProdName] = useState<string>("");
   const [newProdCode, setNewProdCode] = useState<string>("");
-  const [newProdSegment, setNewProdSegment] =
-    useState<BusinessSegment>("RESTAURANT");
   const [newProdCategory, setNewProdCategory] =
-    useState<string>("Karahi & Handi");
+    useState<string>("Main Course");
   const [newProdPrice, setNewProdPrice] = useState<string>("");
-  const [newProdStock, setNewProdStock] = useState<string>("100");
   const [newProdImageUrl, setNewProdImageUrl] = useState<string>("");
+
+  // Material Stock CRUD Form State
+  const [editingStockId, setEditingStockId] = useState<string | null>(null);
+  const [newStockName, setNewStockName] = useState<string>("");
+  const [newStockSku, setNewStockSku] = useState<string>("");
+  const [newStockQty, setNewStockQty] = useState<string>("0");
+  const [newStockTarget, setNewStockTarget] = useState<string>("25");
+  const [newStockUnit, setNewStockUnit] = useState<string>("Kg");
 
   // Super Admin Staff Profile Management Form
   const [newProfileName, setNewProfileName] = useState<string>("");
@@ -370,6 +334,104 @@ export function AlbarkaMaterial3ERP({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  function saveWorkspaceCache(partial: Record<string, unknown>) {
+    try {
+      const raw = localStorage.getItem(WORKSPACE_CACHE_KEY);
+      const prev = raw ? JSON.parse(raw) : {};
+      localStorage.setItem(
+        WORKSPACE_CACHE_KEY,
+        JSON.stringify({ ...prev, ...partial })
+      );
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+
+  function persistSyncQueue(next: QueuedMutation[]) {
+    setSyncQueue(next);
+    try {
+      localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(next));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+
+  async function flushSyncQueue(overrideQueue?: QueuedMutation[]) {
+    const queueToRun = overrideQueue ?? syncQueue;
+    if (queueToRun.length === 0 || syncingQueue) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+
+    setSyncingQueue(true);
+    const remaining: QueuedMutation[] = [];
+    let syncedCount = 0;
+
+    for (let i = 0; i < queueToRun.length; i++) {
+      const item = queueToRun[i];
+      try {
+        const res = await fetch(item.url, {
+          method: item.method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item.payload),
+        });
+        if (!res.ok && res.status >= 500) {
+          remaining.push(...queueToRun.slice(i));
+          break;
+        }
+        syncedCount++;
+      } catch {
+        remaining.push(...queueToRun.slice(i));
+        break;
+      }
+    }
+
+    persistSyncQueue(remaining);
+    setSyncingQueue(false);
+    if (syncedCount > 0 && remaining.length === 0) {
+      notifySaved(`Synced ${syncedCount} offline change(s) to cloud.`);
+      void fetchScopedState();
+    }
+  }
+
+  async function sendFastStateMutation(
+    payload: Record<string, unknown>
+  ): Promise<{ ok: boolean; queued: boolean; data?: Record<string, unknown>; error?: string }> {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      const entry: QueuedMutation = {
+        id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        url: "/api/state",
+        method: "PUT",
+        payload,
+        createdAt: new Date().toISOString(),
+      };
+      persistSyncQueue([...syncQueue, entry]);
+      return { ok: true, queued: true };
+    }
+
+    try {
+      const res = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { ok: false, queued: false, error: data.error || "Sync failed" };
+      }
+      if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
+      return { ok: true, queued: false, data };
+    } catch {
+      const entry: QueuedMutation = {
+        id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        url: "/api/state",
+        method: "PUT",
+        payload,
+        createdAt: new Date().toISOString(),
+      };
+      persistSyncQueue([...syncQueue, entry]);
+      return { ok: true, queued: true };
+    }
+  }
+
   async function fetchScopedState() {
     const stateRes = await fetch("/api/state");
     if (!stateRes.ok) return;
@@ -388,13 +450,73 @@ export function AlbarkaMaterial3ERP({
     if (data.users) setUsers(data.users);
     if (data.waitingTasks) setWaitingTasks(data.waitingTasks);
     if (data.stockMonitor) setStockMonitor(data.stockMonitor);
+    const nextTables: string[] = data.restaurantTables || [];
+    const nextServers: string[] = data.servers || [];
+    setRestaurantTables(nextTables);
+    setServers(nextServers);
+    setTableNumber((prev) =>
+      prev && nextTables.includes(prev) ? prev : nextTables[0] || ""
+    );
+    setWaiterName((prev) =>
+      prev && nextServers.includes(prev) ? prev : nextServers[0] || ""
+    );
     setImmutableAuditLogs(data.immutableAuditLogs || []);
     if (data.cashierShifts) setCashierShifts(data.cashierShifts);
     if (data.fiscalPeriods) setFiscalPeriods(data.fiscalPeriods);
+
+    saveWorkspaceCache({
+      praConfig: data.praConfig,
+      products: data.products || [],
+      orders: data.orders || [],
+      erpInvoices: data.erpInvoices || [],
+      waitingTasks: data.waitingTasks || [],
+      stockMonitor: data.stockMonitor || [],
+      restaurantTables: nextTables,
+      servers: nextServers,
+    });
   }
 
-  // Load State + Verify JWT Cookie Session on Mount
+  // Hydrate instant local cache, monitor connectivity, and verify JWT session on mount
   useEffect(() => {
+    try {
+      const cachedRaw = localStorage.getItem(WORKSPACE_CACHE_KEY);
+      if (cachedRaw) {
+        const c = JSON.parse(cachedRaw);
+        if (c.praConfig) setPraConfig(c.praConfig);
+        if (Array.isArray(c.products)) setProducts(c.products);
+        if (Array.isArray(c.orders)) setOrders(c.orders);
+        if (Array.isArray(c.erpInvoices)) setErpInvoices(c.erpInvoices);
+        if (Array.isArray(c.waitingTasks)) setWaitingTasks(c.waitingTasks);
+        if (Array.isArray(c.stockMonitor)) setStockMonitor(c.stockMonitor);
+        if (Array.isArray(c.restaurantTables)) {
+          setRestaurantTables(c.restaurantTables);
+          setTableNumber((prev) => prev || c.restaurantTables[0] || "");
+        }
+        if (Array.isArray(c.servers)) {
+          setServers(c.servers);
+          setWaiterName((prev) => prev || c.servers[0] || "");
+        }
+      }
+      const qRaw = localStorage.getItem(SYNC_QUEUE_KEY);
+      if (qRaw) {
+        const parsedQueue = JSON.parse(qRaw) as QueuedMutation[];
+        if (Array.isArray(parsedQueue)) setSyncQueue(parsedQueue);
+      }
+    } catch {
+      // Ignore corrupt cache
+    }
+
+    if (typeof navigator !== "undefined") {
+      setIsOnline(navigator.onLine);
+    }
+    const handleOnline = () => {
+      setIsOnline(true);
+      void flushSyncQueue();
+    };
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
     async function initApp() {
       try {
         const [, authRes] = await Promise.all([
@@ -410,12 +532,18 @@ export function AlbarkaMaterial3ERP({
           }
         }
       } catch {
-        // Offline fallback
+        // Offline cache already hydrated
       } finally {
         setAuthChecking(false);
       }
     }
     initApp();
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function notifySaved(msg: string) {
@@ -424,37 +552,41 @@ export function AlbarkaMaterial3ERP({
   }
 
   async function handleApproveTask(task: WaitingTaskItem) {
-    const res = await fetch("/api/state", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ approveTaskId: task.id }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      notifySaved(data.error || "Permission denied for task approval.");
-      return;
-    }
-    if (data.waitingTasks) setWaitingTasks(data.waitingTasks);
-    if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
+    const prevTasks = waitingTasks;
+    const nextTasks = waitingTasks.map((t) =>
+      t.id === task.id ? { ...t, status: "APPROVED" as const } : t
+    );
+    setWaitingTasks(nextTasks);
+    saveWorkspaceCache({ waitingTasks: nextTasks });
     notifySaved(`Approved ${task.referenceCode} (${task.title})`);
+
+    const res = await sendFastStateMutation({ approveTaskId: task.id });
+    if (!res.ok) {
+      setWaitingTasks(prevTasks);
+      saveWorkspaceCache({ waitingTasks: prevTasks });
+      notifySaved(res.error || "Permission denied for task approval.");
+    } else if (res.queued) {
+      notifySaved("Approved offline — queued for cloud sync.");
+    }
   }
 
   async function handleReorderStock(item: StockLevelMonitorItem) {
-    const res = await fetch("/api/state", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reorderStockId: item.id }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      notifySaved(data.error || "Permission denied for stock reorder.");
-      return;
-    }
-    if (data.stockMonitor) setStockMonitor(data.stockMonitor);
-    if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
-    notifySaved(
-      `Restocked ${item.name} to ${item.reorderTarget} ${item.unit}`
+    const prevStock = stockMonitor;
+    const nextStock = stockMonitor.map((s) =>
+      s.id === item.id ? { ...s, currentQty: s.reorderTarget } : s
     );
+    setStockMonitor(nextStock);
+    saveWorkspaceCache({ stockMonitor: nextStock });
+    notifySaved(`Restocked ${item.name} to ${item.reorderTarget} ${item.unit}`);
+
+    const res = await sendFastStateMutation({ reorderStockId: item.id });
+    if (!res.ok) {
+      setStockMonitor(prevStock);
+      saveWorkspaceCache({ stockMonitor: prevStock });
+      notifySaved(res.error || "Permission denied for stock reorder.");
+    } else if (res.queued) {
+      notifySaved("Restocked offline — queued for cloud sync.");
+    }
   }
 
   async function handleLogoutSession() {
@@ -1074,20 +1206,17 @@ export function AlbarkaMaterial3ERP({
         ...existing,
         code: newProdCode.trim() || existing.code,
         name: newProdName.trim(),
-        segment: newProdSegment,
+        segment: "RESTAURANT",
         category: newProdCategory,
-        kitchenStation:
-          newProdSegment === "RETAIL"
-            ? "SWEET_RETAIL"
-            : newProdCategory.includes("BBQ")
-            ? "BBQ_GRILL"
-            : newProdCategory.includes("Tandoor")
-            ? "TANDOOR"
-            : newProdCategory.includes("Rice")
-            ? "RICE_PULAO"
-            : "KARAHI_HANDI",
-        taxMode: newProdSegment === "RETAIL" ? "INCLUSIVE" : "EXCLUSIVE",
-        stockQty: Number(newProdStock) || 0,
+        kitchenStation: newProdCategory.includes("BBQ")
+          ? "BBQ_GRILL"
+          : newProdCategory.includes("Tandoor")
+          ? "TANDOOR"
+          : newProdCategory.includes("Rice")
+          ? "RICE_PULAO"
+          : "KARAHI_HANDI",
+        taxMode: "EXCLUSIVE",
+        stockQty: 0,
         imageUrl: newProdImageUrl.trim() || undefined,
         variants:
           existing.variants.length > 0
@@ -1103,86 +1232,85 @@ export function AlbarkaMaterial3ERP({
             : [
                 {
                   id: `v-${Date.now()}`,
-                  name:
-                    newProdSegment === "RETAIL"
-                      ? "Standard Pack"
-                      : "Full Portion",
+                  name: "Full Portion",
                   price: Number(newProdPrice),
                   costPrice: Math.round(Number(newProdPrice) * 0.6),
                 },
               ],
       };
 
-      const res = await fetch("/api/state", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ editProduct: updatedProduct }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(data.products);
-        cancelEditingProduct();
-        notifySaved(`Updated "${updatedProduct.name}".`);
+      const prevProducts = products;
+      const nextProducts = products.map((p) =>
+        p.id === updatedProduct.id ? updatedProduct : p
+      );
+      setProducts(nextProducts);
+      saveWorkspaceCache({ products: nextProducts });
+      cancelEditingProduct();
+      notifySaved(`Updated "${updatedProduct.name}".`);
+
+      const res = await sendFastStateMutation({ editProduct: updatedProduct });
+      if (!res.ok) {
+        setProducts(prevProducts);
+        saveWorkspaceCache({ products: prevProducts });
+        notifySaved(res.error || "Failed to update menu item.");
       }
       return;
     }
 
     const newProduct: Product = {
       id: `prod-${Date.now()}`,
-      code: newProdCode.trim() || `${products.length + 701}`,
-      barcode: `896100${products.length + 701}`,
+      code: newProdCode.trim() || `${products.length + 101}`,
+      barcode: `896100${products.length + 101}`,
       name: newProdName.trim(),
       nameUrdu: "",
-      segment: newProdSegment,
+      segment: "RESTAURANT",
       category: newProdCategory,
-      kitchenStation:
-        newProdSegment === "RETAIL"
-          ? "SWEET_RETAIL"
-          : newProdCategory.includes("BBQ")
-          ? "BBQ_GRILL"
-          : newProdCategory.includes("Tandoor")
-          ? "TANDOOR"
-          : newProdCategory.includes("Rice")
-          ? "RICE_PULAO"
-          : "KARAHI_HANDI",
-      taxMode: newProdSegment === "RETAIL" ? "INCLUSIVE" : "EXCLUSIVE",
-      stockQty: Number(newProdStock) || 100,
-      unit: newProdSegment === "RETAIL" ? "Pack" : "Portion",
+      kitchenStation: newProdCategory.includes("BBQ")
+        ? "BBQ_GRILL"
+        : newProdCategory.includes("Tandoor")
+        ? "TANDOOR"
+        : newProdCategory.includes("Rice")
+        ? "RICE_PULAO"
+        : "KARAHI_HANDI",
+      taxMode: "EXCLUSIVE",
+      stockQty: 0,
+      unit: "Portion",
       imageUrl: newProdImageUrl.trim() || undefined,
       variants: [
         {
           id: `v-${Date.now()}`,
-          name: newProdSegment === "RETAIL" ? "Standard Pack" : "Full Portion",
+          name: "Full Portion",
           price: Number(newProdPrice),
           costPrice: Math.round(Number(newProdPrice) * 0.6),
         },
       ],
     };
 
-    const res = await fetch("/api/state", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ newProduct }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setProducts(data.products);
-      setNewProdName("");
-      setNewProdCode("");
-      setNewProdPrice("");
-      setNewProdImageUrl("");
-      notifySaved(`Added "${newProduct.name}" to menu catalog.`);
+    const prevProducts = products;
+    const nextProducts = [newProduct, ...products];
+    setProducts(nextProducts);
+    saveWorkspaceCache({ products: nextProducts });
+    setNewProdName("");
+    setNewProdCode("");
+    setNewProdPrice("");
+    setNewProdImageUrl("");
+    notifySaved(`Added "${newProduct.name}" to menu.`);
+
+    const res = await sendFastStateMutation({ newProduct });
+    if (!res.ok) {
+      setProducts(prevProducts);
+      saveWorkspaceCache({ products: prevProducts });
+      notifySaved(res.error || "Failed to add menu item.");
     }
   }
 
   function startEditingProduct(product: Product) {
+    setInventoryTab("MENU");
     setEditingProductId(product.id);
     setNewProdName(product.name);
     setNewProdCode(product.code);
-    setNewProdSegment(product.segment);
     setNewProdCategory(product.category);
     setNewProdPrice(String(product.variants[0]?.price || 0));
-    setNewProdStock(String(product.stockQty));
     setNewProdImageUrl(product.imageUrl || "");
   }
 
@@ -1191,35 +1319,194 @@ export function AlbarkaMaterial3ERP({
     setNewProdName("");
     setNewProdCode("");
     setNewProdPrice("");
-    setNewProdStock("100");
     setNewProdImageUrl("");
   }
 
   async function handleDeleteProduct(productId: string, productName: string) {
-    const res = await fetch("/api/state", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deleteProductId: productId }),
+    const prevProducts = products;
+    const nextProducts = products.filter((p) => p.id !== productId);
+    setProducts(nextProducts);
+    saveWorkspaceCache({ products: nextProducts });
+    if (editingProductId === productId) cancelEditingProduct();
+    notifySaved(`Removed "${productName}" from menu.`);
+
+    const res = await sendFastStateMutation({ deleteProductId: productId });
+    if (!res.ok) {
+      setProducts(prevProducts);
+      saveWorkspaceCache({ products: prevProducts });
+      notifySaved(res.error || "Only Owner / Super Admin can archive items.");
+    }
+  }
+
+  async function handleSaveStockItem(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newStockName.trim()) return;
+
+    const itemPayload: StockLevelMonitorItem = {
+      id: editingStockId || `stk-${Date.now()}`,
+      name: newStockName.trim(),
+      sku: newStockSku.trim() || `MAT-${Date.now().toString().slice(-4)}`,
+      currentQty: Math.max(0, Number(newStockQty) || 0),
+      reorderTarget: Math.max(1, Number(newStockTarget) || 10),
+      unit: newStockUnit.trim() || "Units",
+    };
+
+    const prevStock = stockMonitor;
+    const isEdit = Boolean(editingStockId);
+    const nextStock = isEdit
+      ? stockMonitor.map((s) => (s.id === itemPayload.id ? itemPayload : s))
+      : [itemPayload, ...stockMonitor];
+
+    setStockMonitor(nextStock);
+    saveWorkspaceCache({ stockMonitor: nextStock });
+    setEditingStockId(null);
+    setNewStockName("");
+    setNewStockSku("");
+    setNewStockQty("0");
+    setNewStockTarget("25");
+    setNewStockUnit("Kg");
+    notifySaved(
+      isEdit
+        ? `Updated material "${itemPayload.name}".`
+        : `Added material "${itemPayload.name}".`
+    );
+
+    const res = await sendFastStateMutation(
+      isEdit ? { editStockItem: itemPayload } : { addStockItem: itemPayload }
+    );
+    if (!res.ok) {
+      setStockMonitor(prevStock);
+      saveWorkspaceCache({ stockMonitor: prevStock });
+      notifySaved(res.error || "Failed to save material stock.");
+    }
+  }
+
+  async function handleAdjustStockQty(stockId: string, delta: number) {
+    const prevStock = stockMonitor;
+    const nextStock = stockMonitor.map((s) =>
+      s.id === stockId ? { ...s, currentQty: Math.max(0, s.currentQty + delta) } : s
+    );
+    setStockMonitor(nextStock);
+    saveWorkspaceCache({ stockMonitor: nextStock });
+
+    const res = await sendFastStateMutation({
+      adjustStockQty: { stockId, delta },
     });
-    const data = await res.json();
-    if (res.ok) {
-      setProducts(data.products);
-      if (editingProductId === productId) cancelEditingProduct();
-      notifySaved(`Archived "${productName}" from menu catalog.`);
-    } else {
-      notifySaved(data.error || "Only Owner / Super Admin can archive items.");
+    if (!res.ok) {
+      setStockMonitor(prevStock);
+      saveWorkspaceCache({ stockMonitor: prevStock });
+      notifySaved(res.error || "Failed to adjust stock quantity.");
+    }
+  }
+
+  async function handleDeleteStockItem(stockId: string, name: string) {
+    const prevStock = stockMonitor;
+    const nextStock = stockMonitor.filter((s) => s.id !== stockId);
+    setStockMonitor(nextStock);
+    saveWorkspaceCache({ stockMonitor: nextStock });
+    if (editingStockId === stockId) {
+      setEditingStockId(null);
+      setNewStockName("");
+    }
+    notifySaved(`Removed material "${name}".`);
+
+    const res = await sendFastStateMutation({ deleteStockId: stockId });
+    if (!res.ok) {
+      setStockMonitor(prevStock);
+      saveWorkspaceCache({ stockMonitor: prevStock });
+      notifySaved(res.error || "Only Owner / Super Admin can remove material stock.");
+    }
+  }
+
+  async function handleAddTable(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    const trimmed = newTableInput.trim();
+    if (!trimmed) return;
+    if (restaurantTables.includes(trimmed)) {
+      setNewTableInput("");
+      return;
+    }
+    const prevTables = restaurantTables;
+    const nextTables = [...restaurantTables, trimmed];
+    setRestaurantTables(nextTables);
+    setTableNumber((prev) => prev || trimmed);
+    saveWorkspaceCache({ restaurantTables: nextTables });
+    setNewTableInput("");
+    notifySaved(`Added table "${trimmed}".`);
+
+    const res = await sendFastStateMutation({ addTable: trimmed });
+    if (!res.ok) {
+      setRestaurantTables(prevTables);
+      saveWorkspaceCache({ restaurantTables: prevTables });
+      notifySaved(res.error || "Failed to add table.");
+    }
+  }
+
+  async function handleRemoveTable(target: string) {
+    const prevTables = restaurantTables;
+    const nextTables = restaurantTables.filter((t) => t !== target);
+    setRestaurantTables(nextTables);
+    if (tableNumber === target) setTableNumber(nextTables[0] || "");
+    saveWorkspaceCache({ restaurantTables: nextTables });
+    notifySaved(`Removed table "${target}".`);
+
+    const res = await sendFastStateMutation({ removeTable: target });
+    if (!res.ok) {
+      setRestaurantTables(prevTables);
+      saveWorkspaceCache({ restaurantTables: prevTables });
+      notifySaved(res.error || "Failed to remove table.");
+    }
+  }
+
+  async function handleAddServer(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    const trimmed = newServerInput.trim();
+    if (!trimmed) return;
+    if (servers.includes(trimmed)) {
+      setNewServerInput("");
+      return;
+    }
+    const prevServers = servers;
+    const nextServers = [...servers, trimmed];
+    setServers(nextServers);
+    setWaiterName((prev) => prev || trimmed);
+    saveWorkspaceCache({ servers: nextServers });
+    setNewServerInput("");
+    notifySaved(`Added server "${trimmed}".`);
+
+    const res = await sendFastStateMutation({ addServer: trimmed });
+    if (!res.ok) {
+      setServers(prevServers);
+      saveWorkspaceCache({ servers: prevServers });
+      notifySaved(res.error || "Failed to add server.");
+    }
+  }
+
+  async function handleRemoveServer(target: string) {
+    const prevServers = servers;
+    const nextServers = servers.filter((s) => s !== target);
+    setServers(nextServers);
+    if (waiterName === target) setWaiterName(nextServers[0] || "");
+    saveWorkspaceCache({ servers: nextServers });
+    notifySaved(`Removed server "${target}".`);
+
+    const res = await sendFastStateMutation({ removeServer: target });
+    if (!res.ok) {
+      setServers(prevServers);
+      saveWorkspaceCache({ servers: prevServers });
+      notifySaved(res.error || "Failed to remove server.");
     }
   }
 
   async function handleCreateProfile(e: React.FormEvent) {
     e.preventDefault();
     const isCreatingAdmin = newProfileRole === "ADMIN";
-    if (!newProfileName.trim() || !newProfileEmail.trim()) {
-      notifySaved("Fill in Name and Work Email.");
+    if (!newProfileName.trim()) {
+      notifySaved("Enter full name.");
       return;
     }
-    if (isCreatingAdmin && newProfilePassword.length < 8) {
-      notifySaved("Super Admin profiles require a password (min 8 chars).");
+    if (isCreatingAdmin && (!newProfileEmail.trim() || newProfilePassword.length < 8)) {
+      notifySaved("Super Admin profiles require Work Email and a password (min 8 chars).");
       return;
     }
     if (!isCreatingAdmin && !/^\d{4}$/.test(newProfilePin.trim())) {
@@ -1451,11 +1738,315 @@ export function AlbarkaMaterial3ERP({
       case "accounting":
         return ledger.length;
       case "hr":
-        return users.length;
+        return users.length + servers.length;
       default:
         return undefined;
     }
   };
+
+  const renderFloorOpsSection = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <Card className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-md-on-surface">
+              Restaurant tables ({restaurantTables.length})
+            </h3>
+            <p className="text-xs text-md-on-surface-variant mt-0.5">
+              Add or remove dining tables shown on the POS Terminal
+            </p>
+          </div>
+          <StatusChip label="Dine-In" variant="primary" />
+        </div>
+        <form onSubmit={handleAddTable} className="flex gap-2">
+          <CompactField
+            value={newTableInput}
+            onChange={setNewTableInput}
+            placeholder="e.g. Table 1, Hall A-2, VIP-1"
+            className="flex-1"
+          />
+          <Button type="submit" variant="filled" size="sm" icon={<Plus className="w-4 h-4" />}>
+            Add table
+          </Button>
+        </form>
+        {restaurantTables.length === 0 ? (
+          <EmptyState
+            title="No tables configured"
+            subtitle="Add dining tables above to assign Dine-In orders in POS."
+          />
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {restaurantTables.map((t) => (
+              <span
+                key={t}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-md-surface-container-low border border-md-outline-variant text-sm text-md-on-surface"
+              >
+                <span>{t}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove table ${t}`}
+                  onClick={() => void handleRemoveTable(t)}
+                  className="text-md-error hover:opacity-75"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-md-on-surface">
+              Waiters &amp; servers ({servers.length})
+            </h3>
+            <p className="text-xs text-md-on-surface-variant mt-0.5">
+              Add or remove floor servers assignable on POS orders
+            </p>
+          </div>
+          <StatusChip label="Floor Team" variant="success" />
+        </div>
+        <form onSubmit={handleAddServer} className="flex gap-2">
+          <CompactField
+            value={newServerInput}
+            onChange={setNewServerInput}
+            placeholder="e.g. Ahmed Ali, Counter Self"
+            className="flex-1"
+          />
+          <Button type="submit" variant="filled" size="sm" icon={<Plus className="w-4 h-4" />}>
+            Add server
+          </Button>
+        </form>
+        {servers.length === 0 ? (
+          <EmptyState
+            title="No servers configured"
+            subtitle="Add servers above so cashiers can tag orders cleanly."
+          />
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {servers.map((s) => (
+              <span
+                key={s}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-md-surface-container-low border border-md-outline-variant text-sm text-md-on-surface"
+              >
+                <span>{s}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove server ${s}`}
+                  onClick={() => void handleRemoveServer(s)}
+                  className="text-md-error hover:opacity-75"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+
+  const renderStaffProfilesSection = (showPasswordRotation: boolean) => (
+    <div className="space-y-6">
+      <Card className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-base font-semibold text-md-on-surface">
+              Add Manager or Cashier profile
+            </h2>
+            <p className="text-xs text-md-on-surface-variant mt-0.5">
+              Super Admin control: add or remove Manager, Cashier, or Admin workspace profiles.
+            </p>
+          </div>
+          <StatusChip label="Super Admin Control" variant="primary" />
+        </div>
+
+        <form onSubmit={handleCreateProfile} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <OutlinedTextField
+              label="Full name"
+              required
+              placeholder="e.g. Bilal Ahmed"
+              value={newProfileName}
+              onChange={setNewProfileName}
+            />
+            <OutlinedTextField
+              label="Hierarchy role"
+              value={newProfileRole}
+              onChange={(v) => setNewProfileRole(v as UserRole)}
+              options={[
+                { value: "CASHIER", label: "CASHIER (POS Only)" },
+                { value: "MANAGER", label: "MANAGER (Floor Ops)" },
+                { value: "ADMIN", label: "ADMIN (Super Admin)" },
+              ]}
+            />
+            {newProfileRole === "ADMIN" ? (
+              <OutlinedTextField
+                label="Admin password (min 8)"
+                type="password"
+                required
+                placeholder="Strong password"
+                value={newProfilePassword}
+                onChange={setNewProfilePassword}
+              />
+            ) : (
+              <OutlinedTextField
+                label="4-digit PIN"
+                mono
+                required
+                placeholder="4444"
+                value={newProfilePin}
+                onChange={setNewProfilePin}
+              />
+            )}
+            <OutlinedTextField
+              label={newProfileRole === "ADMIN" ? "Username" : "Username (optional)"}
+              mono
+              required={newProfileRole === "ADMIN"}
+              placeholder="Auto-filled from name if blank"
+              value={newProfileUsername}
+              onChange={setNewProfileUsername}
+            />
+            <OutlinedTextField
+              label="Job title (optional)"
+              placeholder="e.g. Evening Cashier"
+              value={newProfileTitle}
+              onChange={setNewProfileTitle}
+            />
+            <OutlinedTextField
+              label={newProfileRole === "ADMIN" ? "Work email" : "Work email (optional)"}
+              type="email"
+              required={newProfileRole === "ADMIN"}
+              placeholder="name@stacklyra.com"
+              value={newProfileEmail}
+              onChange={setNewProfileEmail}
+            />
+          </div>
+          <Button
+            type="submit"
+            variant="filled"
+            disabled={savingProfile}
+            icon={<Plus className="w-4 h-4" strokeWidth={1.8} />}
+          >
+            {savingProfile ? "Saving profile…" : `Add ${newProfileRole.toLowerCase()} profile`}
+          </Button>
+        </form>
+      </Card>
+
+      {showPasswordRotation && (
+        <Card className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold text-md-on-surface">
+                Rotate Super Admin password
+              </h2>
+              <p className="text-xs text-md-on-surface-variant mt-0.5">
+                Updates your salted scrypt password hash in MongoDB Atlas immediately.
+              </p>
+            </div>
+            <StatusChip label="scrypt KDF" variant="success" />
+          </div>
+          <form onSubmit={handleChangeAdminPassword} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <OutlinedTextField
+                label="Current password"
+                type="password"
+                required
+                value={currentAdminPassword}
+                onChange={setCurrentAdminPassword}
+              />
+              <OutlinedTextField
+                label="New password (min 8)"
+                type="password"
+                required
+                value={nextAdminPassword}
+                onChange={setNextAdminPassword}
+              />
+              <OutlinedTextField
+                label="Confirm new password"
+                type="password"
+                required
+                value={confirmAdminPassword}
+                onChange={setConfirmAdminPassword}
+              />
+            </div>
+            <Button
+              type="submit"
+              variant="tonal"
+              disabled={savingAdminPassword}
+              icon={<KeyRound className="w-4 h-4" strokeWidth={1.8} />}
+            >
+              {savingAdminPassword ? "Updating…" : "Update Super Admin password"}
+            </Button>
+          </form>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {users.map((u) => {
+          const isSelf = u.id === currentUser.id;
+          const adminCount = users.filter((x) => x.role === "ADMIN").length;
+          const cannotRemove = isSelf || (u.role === "ADMIN" && adminCount <= 1);
+          const isPasswordProfile = u.role === "ADMIN" || u.authType === "PASSWORD";
+          return (
+            <Card key={u.id} className="space-y-3 flex flex-col justify-between">
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <StatusChip
+                    label={u.role === "ADMIN" ? "OWNER / SUPER ADMIN" : u.role}
+                    variant={
+                      u.role === "ADMIN"
+                        ? "primary"
+                        : u.role === "MANAGER"
+                        ? "success"
+                        : "neutral"
+                    }
+                  />
+                  <span className="font-mono text-xs text-md-on-surface-variant">
+                    {isPasswordProfile ? "Password" : `PIN: ${u.pin || "****"}`}
+                  </span>
+                </div>
+                <div>
+                  <div className="font-medium text-base text-md-on-surface">
+                    {u.name}
+                  </div>
+                  <div className="text-xs text-md-on-surface-variant">
+                    @{u.username || u.email.split("@")[0]} · {u.title} · {u.email}
+                  </div>
+                </div>
+                <div className="text-[11px] text-md-on-surface-variant pt-1">
+                  {u.role === "ADMIN"
+                    ? "Full access: Ledger, Deletes/Voids, MongoDB, PRA & Profiles"
+                    : u.role === "MANAGER"
+                    ? "POS, Discounts & Menu/Stock edits (No Ledger or Deletes)"
+                    : "POS Terminal & Read-only Catalog (No Ledger or Deletes)"}
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-md-divider flex items-center justify-between">
+                <span className="text-[11px] text-md-on-surface-variant">
+                  {isSelf ? "Current signed-in user" : "Workspace profile"}
+                </span>
+                {!cannotRemove && (
+                  <Button
+                    variant="text"
+                    size="sm"
+                    icon={<Trash2 className="w-3.5 h-3.5 text-md-error" strokeWidth={1.8} />}
+                    onClick={() => handleDeleteProfile(u.id, u.name)}
+                    className="text-md-error!"
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen flex bg-md-surface text-md-on-surface">
@@ -1699,6 +2290,29 @@ export function AlbarkaMaterial3ERP({
 
           {/* Right Side 48px Touch-Target Action Icons & User Menu */}
           <div className="flex items-center gap-1 sm:gap-2 relative">
+            {(!isOnline || syncQueue.length > 0) && (
+              <button
+                type="button"
+                onClick={() => void flushSyncQueue()}
+                title="Click to sync pending offline changes"
+                className={`px-2.5 py-1 rounded-full text-xs font-medium border flex items-center gap-1.5 transition ${
+                  !isOnline
+                    ? "bg-md-error-container text-md-on-error-container border-md-error/30"
+                    : "bg-md-warning-container text-md-on-warning-container border-md-outline-variant"
+                }`}
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${syncingQueue ? "animate-spin" : ""}`}
+                />
+                <span>
+                  {!isOnline
+                    ? `Offline${syncQueue.length > 0 ? ` (${syncQueue.length})` : ""}`
+                    : syncingQueue
+                    ? "Syncing…"
+                    : `Sync ${syncQueue.length} queued`}
+                </span>
+              </button>
+            )}
             <ThemeToggle />
 
             <Button
@@ -1952,22 +2566,131 @@ export function AlbarkaMaterial3ERP({
                   </div>
 
                   {orderType === "DINE_IN" ? (
-                    <div className="grid grid-cols-2 gap-3 pt-1">
-                      <OutlinedTextField
-                        label="Table"
-                        value={tableNumber}
-                        onChange={setTableNumber}
-                        options={RESTAURANT_TABLES.map((t) => ({
-                          value: t,
-                          label: t,
-                        }))}
-                      />
-                      <OutlinedTextField
-                        label="Server"
-                        value={waiterName}
-                        onChange={setWaiterName}
-                        options={WAITERS.map((w) => ({ value: w, label: w }))}
-                      />
+                    <div className="space-y-2.5 pt-1">
+                      <div className="grid grid-cols-2 gap-3">
+                        <OutlinedTextField
+                          label="Table"
+                          value={tableNumber}
+                          onChange={setTableNumber}
+                          options={
+                            restaurantTables.length > 0
+                              ? restaurantTables.map((t) => ({
+                                  value: t,
+                                  label: t,
+                                }))
+                              : [{ value: "", label: "No tables added" }]
+                          }
+                        />
+                        <OutlinedTextField
+                          label="Server"
+                          value={waiterName}
+                          onChange={setWaiterName}
+                          options={
+                            servers.length > 0
+                              ? servers.map((w) => ({ value: w, label: w }))
+                              : [{ value: "", label: "No servers added" }]
+                          }
+                        />
+                      </div>
+
+                      {canManageInventory && (
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-md-on-surface-variant">
+                            {restaurantTables.length} tables · {servers.length} servers
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setManageFloorOpen((prev) => !prev)}
+                            className="font-medium text-md-primary hover:underline"
+                          >
+                            {manageFloorOpen ? "Done editing" : "+ Manage tables & servers"}
+                          </button>
+                        </div>
+                      )}
+
+                      {manageFloorOpen && canManageInventory && (
+                        <div className="p-3 rounded-xl bg-md-surface-container-low space-y-3 text-xs">
+                          <div className="space-y-1.5">
+                            <div className="font-medium text-md-on-surface">
+                              Tables
+                            </div>
+                            <div className="flex gap-1.5">
+                              <CompactField
+                                value={newTableInput}
+                                onChange={setNewTableInput}
+                                placeholder="e.g. Table 1 or VIP-2"
+                                className="flex-1"
+                              />
+                              <Button
+                                type="button"
+                                variant="tonal"
+                                size="sm"
+                                onClick={() => void handleAddTable()}
+                              >
+                                Add
+                              </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {restaurantTables.map((t) => (
+                                <span
+                                  key={t}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-md-surface-container-lowest border border-md-outline-variant text-md-on-surface"
+                                >
+                                  <span>{t}</span>
+                                  <button
+                                    type="button"
+                                    aria-label={`Remove table ${t}`}
+                                    onClick={() => void handleRemoveTable(t)}
+                                    className="text-md-error hover:opacity-75"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-1.5 pt-2 border-t border-md-divider">
+                            <div className="font-medium text-md-on-surface">
+                              Servers
+                            </div>
+                            <div className="flex gap-1.5">
+                              <CompactField
+                                value={newServerInput}
+                                onChange={setNewServerInput}
+                                placeholder="e.g. Ahmed Ali"
+                                className="flex-1"
+                              />
+                              <Button
+                                type="button"
+                                variant="tonal"
+                                size="sm"
+                                onClick={() => void handleAddServer()}
+                              >
+                                Add
+                              </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {servers.map((s) => (
+                                <span
+                                  key={s}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-md-surface-container-lowest border border-md-outline-variant text-md-on-surface"
+                                >
+                                  <span>{s}</span>
+                                  <button
+                                    type="button"
+                                    aria-label={`Remove server ${s}`}
+                                    onClick={() => void handleRemoveServer(s)}
+                                    className="text-md-error hover:opacity-75"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-3 pt-1">
@@ -2250,216 +2973,437 @@ export function AlbarkaMaterial3ERP({
           )}
 
           {/* =============================================================== */}
-          {/* INVENTORY & MENU CATALOGUE                                      */}
+          {/* SEPARATED RESTAURANT MENU & MATERIAL STOCK                      */}
           {/* =============================================================== */}
           {activeNav === "inventory" && (
             <div className="space-y-6">
               <PageHeader
-                title="Inventory & menu catalogue"
-                subtitle="Manage restaurant dishes, retail SKUs, stock levels, and card photos"
+                title={
+                  inventoryTab === "MENU"
+                    ? "Restaurant menu"
+                    : "Material stock"
+                }
+                subtitle={
+                  inventoryTab === "MENU"
+                    ? "Add dishes, categories, prices, and photos (no stock tracking required)"
+                    : "Track raw materials, ingredients, supplies, and reorder thresholds"
+                }
+                actions={
+                  <SegmentedButton
+                    value={inventoryTab}
+                    onChange={(tab) => setInventoryTab(tab)}
+                    options={[
+                      { value: "MENU", label: `Menu (${products.length})` },
+                      {
+                        value: "STOCK",
+                        label: `Material Stock (${stockMonitor.length})`,
+                      },
+                    ]}
+                  />
+                }
               />
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {canManageInventory && (
-                  <Card className="lg:col-span-4 space-y-4 h-fit">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-base font-semibold text-md-on-surface">
-                      {editingProductId
-                        ? `Edit item (#${newProdCode})`
-                        : "New product / dish"}
-                    </h2>
-                    {editingProductId && (
-                      <Button
-                        variant="text"
-                        size="sm"
-                        onClick={cancelEditingProduct}
-                      >
-                        Cancel
-                      </Button>
-                    )}
-                  </div>
-
-                  <form onSubmit={handleAddProduct} className="space-y-4">
-                    <OutlinedTextField
-                      label="Product or dish name"
-                      required
-                      value={newProdName}
-                      onChange={setNewProdName}
-                    />
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <OutlinedTextField
-                        label="Segment"
-                        value={newProdSegment}
-                        onChange={(v) =>
-                          setNewProdSegment(v as BusinessSegment)
-                        }
-                        options={[
-                          { value: "RESTAURANT", label: "Restaurant (KOT)" },
-                          { value: "RETAIL", label: "Retail (SKU)" },
-                        ]}
-                      />
-                      <OutlinedTextField
-                        label="Category"
-                        value={newProdCategory}
-                        onChange={setNewProdCategory}
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3">
-                      <OutlinedTextField
-                        label="SKU"
-                        mono
-                        value={newProdCode}
-                        onChange={setNewProdCode}
-                      />
-                      <OutlinedTextField
-                        label="Price"
-                        type="number"
-                        required
-                        value={newProdPrice}
-                        onChange={setNewProdPrice}
-                      />
-                      <OutlinedTextField
-                        label="Stock"
-                        type="number"
-                        value={newProdStock}
-                        onChange={setNewProdStock}
-                      />
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-md-surface-container-low space-y-2.5">
-                      <label className="text-xs font-medium text-md-on-surface-variant block">
-                        Product photo (file or URL)
-                      </label>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleNewProdImageFile}
-                        className="w-full text-xs text-md-on-surface-variant file:mr-3 file:py-1.5 file:px-3.5 file:rounded-full file:border-0 file:text-xs file:font-medium file:bg-md-secondary-container file:text-md-on-secondary-container hover:file:bg-md-primary-container"
-                      />
-                      <CompactField
-                        value={newProdImageUrl}
-                        onChange={setNewProdImageUrl}
-                        placeholder="Or paste image URL (https://…)"
-                        className="w-full"
-                      />
-                    </div>
-
-                    <Button type="submit" variant="filled" className="w-full">
-                      {editingProductId ? "Save changes" : "Add to catalogue"}
-                    </Button>
-                  </form>
-                </Card>
-                )}
-
-                <Card
-                  className={`${
-                    canManageInventory ? "lg:col-span-8" : "lg:col-span-12"
-                  } p-0! overflow-hidden`}
-                >
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead>
-                        <tr className="border-b border-md-divider bg-md-surface-container-low/60 text-xs font-medium text-md-on-surface-variant">
-                          <th className="py-3.5 px-4">Photo</th>
-                          <th className="py-3.5 px-3">SKU</th>
-                          <th className="py-3.5 px-3">Product</th>
-                          <th className="py-3.5 px-3">Segment</th>
-                          <th className="py-3.5 px-3">Price</th>
-                          <th className="py-3.5 px-4 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-md-divider">
-                        {products.map((p) => (
-                          <tr
-                            key={p.id}
-                            className="hover:bg-md-surface-container-low transition"
+              {inventoryTab === "MENU" ? (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  {canManageInventory && (
+                    <Card className="lg:col-span-4 space-y-4 h-fit">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-base font-semibold text-md-on-surface">
+                          {editingProductId
+                            ? `Edit dish (#${newProdCode})`
+                            : "New menu dish"}
+                        </h2>
+                        {editingProductId && (
+                          <Button
+                            variant="text"
+                            size="sm"
+                            onClick={cancelEditingProduct}
                           >
-                            <td className="py-3 px-4">
-                              {p.imageUrl ? (
-                                <img
-                                  src={p.imageUrl}
-                                  alt={p.name}
-                                  className="w-12 h-9 rounded-lg object-cover border border-md-outline-variant"
-                                />
-                              ) : (
-                                <div className="w-12 h-9 rounded-lg bg-md-surface-container-high flex items-center justify-center text-md-on-surface-variant">
-                                  <ImageIcon className="w-4 h-4" />
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-3 px-3 font-mono font-medium text-md-primary">
-                              #{p.code}
-                            </td>
-                            <td className="py-3 px-3">
-                              <div className="font-medium text-md-on-surface">
-                                {p.name}
-                              </div>
-                              <div className="text-xs text-md-on-surface-variant">
-                                {p.category}
-                              </div>
-                            </td>
-                            <td className="py-3 px-3">
-                              <StatusChip
-                                label={p.segment}
-                                variant={
-                                  p.segment === "RESTAURANT"
-                                    ? "primary"
-                                    : "success"
-                                }
-                              />
-                            </td>
-                            <td className="py-3 px-3 font-mono text-xs tabular-nums">
-                              PKR {p.variants[0]?.price.toLocaleString()}
-                            </td>
-                            <td className="py-3 px-4 text-right">
-                              <div className="inline-flex items-center gap-1">
-                                {canManageInventory && (
-                                  <Button
-                                    variant="icon"
-                                    aria-label="Edit item"
-                                    onClick={() => startEditingProduct(p)}
-                                    className="w-9! h-9!"
-                                  >
-                                    <Pencil className="w-4 h-4" strokeWidth={1.8} />
-                                  </Button>
-                                )}
-                                {canArchiveInventory && (
-                                  <Button
-                                    variant="icon"
-                                    aria-label="Archive item"
-                                    onClick={() =>
-                                      handleDeleteProduct(p.id, p.name)
-                                    }
-                                    className="w-9! h-9!"
-                                  >
-                                    <Trash2 className="w-4 h-4" strokeWidth={1.8} />
-                                  </Button>
-                                )}
-                                {!canManageInventory && !canArchiveInventory && (
-                                  <span className="text-xs text-md-on-surface-variant">
-                                    Read-only
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
-              </div>
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
+
+                      <form onSubmit={handleAddProduct} className="space-y-4">
+                        <OutlinedTextField
+                          label="Dish name"
+                          required
+                          placeholder="e.g. Chicken Karahi"
+                          value={newProdName}
+                          onChange={setNewProdName}
+                        />
+
+                        <OutlinedTextField
+                          label="Category"
+                          placeholder="e.g. Karahi & Handi, BBQ, Drinks"
+                          value={newProdCategory}
+                          onChange={setNewProdCategory}
+                        />
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <OutlinedTextField
+                            label="SKU / Code"
+                            mono
+                            placeholder="101"
+                            value={newProdCode}
+                            onChange={setNewProdCode}
+                          />
+                          <OutlinedTextField
+                            label="Price (PKR)"
+                            type="number"
+                            required
+                            value={newProdPrice}
+                            onChange={setNewProdPrice}
+                          />
+                        </div>
+
+                        <div className="p-3.5 rounded-xl bg-md-surface-container-low space-y-2.5">
+                          <label className="text-xs font-medium text-md-on-surface-variant block">
+                            Dish photo (file or URL)
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleNewProdImageFile}
+                            className="w-full text-xs text-md-on-surface-variant file:mr-3 file:py-1.5 file:px-3.5 file:rounded-full file:border-0 file:text-xs file:font-medium file:bg-md-secondary-container file:text-md-on-secondary-container hover:file:bg-md-primary-container"
+                          />
+                          <CompactField
+                            value={newProdImageUrl}
+                            onChange={setNewProdImageUrl}
+                            placeholder="Or paste image URL (https://…)"
+                            className="w-full"
+                          />
+                        </div>
+
+                        <Button type="submit" variant="filled" className="w-full">
+                          {editingProductId ? "Save changes" : "Add to menu"}
+                        </Button>
+                      </form>
+                    </Card>
+                  )}
+
+                  <Card
+                    className={`${
+                      canManageInventory ? "lg:col-span-8" : "lg:col-span-12"
+                    } p-0! overflow-hidden`}
+                  >
+                    {products.length === 0 ? (
+                      <div className="p-6">
+                        <EmptyState
+                          title="No menu items yet"
+                          subtitle="Add your restaurant dishes on the left to make them available in POS Terminal."
+                        />
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead>
+                            <tr className="border-b border-md-divider bg-md-surface-container-low/60 text-xs font-medium text-md-on-surface-variant">
+                              <th className="py-3.5 px-4">Photo</th>
+                              <th className="py-3.5 px-3">Code</th>
+                              <th className="py-3.5 px-3">Dish &amp; Category</th>
+                              <th className="py-3.5 px-3">Kitchen</th>
+                              <th className="py-3.5 px-3">Price</th>
+                              <th className="py-3.5 px-4 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-md-divider">
+                            {products.map((p) => (
+                              <tr
+                                key={p.id}
+                                className="hover:bg-md-surface-container-low transition"
+                              >
+                                <td className="py-3 px-4">
+                                  {p.imageUrl ? (
+                                    <img
+                                      src={p.imageUrl}
+                                      alt={p.name}
+                                      className="w-12 h-9 rounded-lg object-cover border border-md-outline-variant"
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-9 rounded-lg bg-md-surface-container-high flex items-center justify-center text-md-on-surface-variant">
+                                      <ImageIcon className="w-4 h-4" />
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3 font-mono font-medium text-md-primary">
+                                  #{p.code}
+                                </td>
+                                <td className="py-3 px-3">
+                                  <div className="font-medium text-md-on-surface">
+                                    {p.name}
+                                  </div>
+                                  <div className="text-xs text-md-on-surface-variant">
+                                    {p.category}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3">
+                                  <StatusChip
+                                    label={p.kitchenStation}
+                                    variant="primary"
+                                  />
+                                </td>
+                                <td className="py-3 px-3 font-mono text-xs tabular-nums">
+                                  PKR {p.variants[0]?.price.toLocaleString()}
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  <div className="inline-flex items-center gap-1">
+                                    {canManageInventory && (
+                                      <Button
+                                        variant="icon"
+                                        aria-label="Edit item"
+                                        onClick={() => startEditingProduct(p)}
+                                        className="w-9! h-9!"
+                                      >
+                                        <Pencil className="w-4 h-4" strokeWidth={1.8} />
+                                      </Button>
+                                    )}
+                                    {canArchiveInventory && (
+                                      <Button
+                                        variant="icon"
+                                        aria-label="Archive item"
+                                        onClick={() =>
+                                          handleDeleteProduct(p.id, p.name)
+                                        }
+                                        className="w-9! h-9!"
+                                      >
+                                        <Trash2 className="w-4 h-4" strokeWidth={1.8} />
+                                      </Button>
+                                    )}
+                                    {!canManageInventory && !canArchiveInventory && (
+                                      <span className="text-xs text-md-on-surface-variant">
+                                        Read-only
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </Card>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  {canManageInventory && (
+                    <Card className="lg:col-span-4 space-y-4 h-fit">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-base font-semibold text-md-on-surface">
+                          {editingStockId ? "Edit material stock" : "Add raw material"}
+                        </h2>
+                        {editingStockId && (
+                          <Button
+                            variant="text"
+                            size="sm"
+                            onClick={() => {
+                              setEditingStockId(null);
+                              setNewStockName("");
+                              setNewStockSku("");
+                              setNewStockQty("0");
+                              setNewStockTarget("25");
+                              setNewStockUnit("Kg");
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
+
+                      <form onSubmit={handleSaveStockItem} className="space-y-4">
+                        <OutlinedTextField
+                          label="Material name"
+                          required
+                          placeholder="e.g. Basmati Rice, Cooking Oil"
+                          value={newStockName}
+                          onChange={setNewStockName}
+                        />
+                        <div className="grid grid-cols-2 gap-3">
+                          <OutlinedTextField
+                            label="SKU / Code"
+                            mono
+                            placeholder="MAT-01"
+                            value={newStockSku}
+                            onChange={setNewStockSku}
+                          />
+                          <OutlinedTextField
+                            label="Unit"
+                            placeholder="Kg, Ltr, Tins"
+                            value={newStockUnit}
+                            onChange={setNewStockUnit}
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <OutlinedTextField
+                            label="Current qty"
+                            type="number"
+                            required
+                            value={newStockQty}
+                            onChange={setNewStockQty}
+                          />
+                          <OutlinedTextField
+                            label="Reorder target"
+                            type="number"
+                            required
+                            value={newStockTarget}
+                            onChange={setNewStockTarget}
+                          />
+                        </div>
+                        <Button type="submit" variant="filled" className="w-full">
+                          {editingStockId ? "Save material" : "Add material"}
+                        </Button>
+                      </form>
+                    </Card>
+                  )}
+
+                  <Card
+                    className={`${
+                      canManageInventory ? "lg:col-span-8" : "lg:col-span-12"
+                    } p-0! overflow-hidden`}
+                  >
+                    {stockMonitor.length === 0 ? (
+                      <div className="p-6">
+                        <EmptyState
+                          title="No material stock entries yet"
+                          subtitle="Add raw kitchen ingredients or supply items on the left to track inventory."
+                        />
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead>
+                            <tr className="border-b border-md-divider bg-md-surface-container-low/60 text-xs font-medium text-md-on-surface-variant">
+                              <th className="py-3.5 px-4">SKU</th>
+                              <th className="py-3.5 px-3">Material</th>
+                              <th className="py-3.5 px-3">Level</th>
+                              <th className="py-3.5 px-3 text-right">Qty on Hand</th>
+                              <th className="py-3.5 px-4 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-md-divider">
+                            {stockMonitor.map((stk) => {
+                              const pct = stk.reorderTarget > 0
+                                ? Math.round((stk.currentQty / stk.reorderTarget) * 100)
+                                : 0;
+                              return (
+                                <tr
+                                  key={stk.id}
+                                  className="hover:bg-md-surface-container-low transition"
+                                >
+                                  <td className="py-3.5 px-4 font-mono text-xs text-md-primary font-medium">
+                                    {stk.sku}
+                                  </td>
+                                  <td className="py-3.5 px-3 font-medium text-md-on-surface">
+                                    {stk.name}
+                                  </td>
+                                  <td className="py-3.5 px-3 w-44">
+                                    <div className="space-y-1">
+                                      <ProgressBar
+                                        value={stk.currentQty}
+                                        max={stk.reorderTarget}
+                                      />
+                                      <div className="text-[11px] font-mono text-md-on-surface-variant">
+                                        {pct}% of {stk.reorderTarget} {stk.unit}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="py-3.5 px-3 text-right font-mono tabular-nums">
+                                    {stk.currentQty} {stk.unit}
+                                  </td>
+                                  <td className="py-3.5 px-4 text-right">
+                                    <div className="inline-flex items-center gap-1">
+                                      {canManageInventory && (
+                                        <>
+                                          <Button
+                                            variant="tonal"
+                                            size="sm"
+                                            onClick={() =>
+                                              void handleAdjustStockQty(stk.id, -1)
+                                            }
+                                            className="px-2.5!"
+                                          >
+                                            -1
+                                          </Button>
+                                          <Button
+                                            variant="tonal"
+                                            size="sm"
+                                            onClick={() =>
+                                              void handleAdjustStockQty(stk.id, 1)
+                                            }
+                                            className="px-2.5!"
+                                          >
+                                            +1
+                                          </Button>
+                                          <Button
+                                            variant="icon"
+                                            aria-label="Edit material"
+                                            onClick={() => {
+                                              setEditingStockId(stk.id);
+                                              setNewStockName(stk.name);
+                                              setNewStockSku(stk.sku);
+                                              setNewStockQty(String(stk.currentQty));
+                                              setNewStockTarget(
+                                                String(stk.reorderTarget)
+                                              );
+                                              setNewStockUnit(stk.unit);
+                                            }}
+                                            className="w-9! h-9!"
+                                          >
+                                            <Pencil className="w-4 h-4" strokeWidth={1.8} />
+                                          </Button>
+                                        </>
+                                      )}
+                                      {canArchiveInventory && (
+                                        <Button
+                                          variant="icon"
+                                          aria-label="Remove material"
+                                          onClick={() =>
+                                            void handleDeleteStockItem(
+                                              stk.id,
+                                              stk.name
+                                            )
+                                          }
+                                          className="w-9! h-9!"
+                                        >
+                                          <Trash2 className="w-4 h-4" strokeWidth={1.8} />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </Card>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* =============================================================== */}
+          {/* PEOPLE, STAFF PROFILES & FLOOR OPS (TABLES & SERVERS)           */}
+          {/* =============================================================== */}
+          {activeNav === "hr" && (
+            <div className="space-y-6">
+              <PageHeader
+                title="People, staff & floor team"
+                subtitle="Add or remove Manager/Cashier PIN profiles, dining tables, and floor servers"
+              />
+
+              {canManageUsers && renderStaffProfilesSection(false)}
+
+              {canManageInventory && renderFloorOpsSection()}
             </div>
           )}
 
           {/* =============================================================== */}
           {/* ACCOUNTING & DOUBLE-ENTRY KHATA LEDGER (SUPER ADMIN ONLY)       */}
           {/* =============================================================== */}
-          {(activeNav === "accounting" ||
-            activeNav === "purchasing" ||
-            activeNav === "hr") &&
+          {(activeNav === "accounting" || activeNav === "purchasing") &&
             (!canViewLedger ? (
               <Card>
                 <EmptyState
@@ -2473,8 +3417,6 @@ export function AlbarkaMaterial3ERP({
                 title={
                   activeNav === "purchasing"
                     ? "Purchasing & supplier payables"
-                    : activeNav === "hr"
-                    ? "People, HR & payroll accounts"
                     : "Accounting & double-entry ledger"
                 }
                 subtitle="Append-only financial journal, customer receivables, supplier payables, and PRA tax calculator"
@@ -3123,213 +4065,9 @@ export function AlbarkaMaterial3ERP({
                 </Card>
               )}
 
-              {settingsSubTab === "RESTAURANT_PROFILES" && canManageUsers && (
-                <div className="space-y-6">
-                  {/* Add Staff Profile Form (Owner / Super Admin Only) */}
-                  <Card className="space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <h2 className="text-base font-semibold text-md-on-surface">
-                          Add new workspace profile
-                        </h2>
-                        <p className="text-xs text-md-on-surface-variant mt-0.5">
-                          Super Admin hierarchy: only Owner / Super Admin profiles can create or remove staff, delete items/invoices, or view the financial ledger.
-                        </p>
-                      </div>
-                      <StatusChip label="Super Admin Control" variant="primary" />
-                    </div>
-
-                    <form onSubmit={handleCreateProfile} className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        <OutlinedTextField
-                          label="Full name"
-                          required
-                          placeholder="e.g. Bilal Ahmed"
-                          value={newProfileName}
-                          onChange={setNewProfileName}
-                        />
-                        <OutlinedTextField
-                          label="Username"
-                          mono
-                          required
-                          placeholder="e.g. bilal"
-                          value={newProfileUsername}
-                          onChange={setNewProfileUsername}
-                        />
-                        <OutlinedTextField
-                          label="Hierarchy role"
-                          value={newProfileRole}
-                          onChange={(v) => setNewProfileRole(v as UserRole)}
-                          options={[
-                            { value: "CASHIER", label: "CASHIER (POS Only)" },
-                            { value: "MANAGER", label: "MANAGER (Floor Ops)" },
-                            { value: "ADMIN", label: "ADMIN (Super Admin)" },
-                          ]}
-                        />
-                        <OutlinedTextField
-                          label="Job title"
-                          placeholder="e.g. Evening Cashier"
-                          value={newProfileTitle}
-                          onChange={setNewProfileTitle}
-                        />
-                        <OutlinedTextField
-                          label="Work email"
-                          type="email"
-                          required
-                          placeholder="name@albarkarestaurant.pk"
-                          value={newProfileEmail}
-                          onChange={setNewProfileEmail}
-                        />
-                        {newProfileRole === "ADMIN" ? (
-                          <OutlinedTextField
-                            label="Admin password (min 8)"
-                            type="password"
-                            required
-                            placeholder="Strong password"
-                            value={newProfilePassword}
-                            onChange={setNewProfilePassword}
-                          />
-                        ) : (
-                          <OutlinedTextField
-                            label="4-digit PIN"
-                            mono
-                            required
-                            placeholder="4444"
-                            value={newProfilePin}
-                            onChange={setNewProfilePin}
-                          />
-                        )}
-                      </div>
-                      <Button
-                        type="submit"
-                        variant="filled"
-                        disabled={savingProfile}
-                        icon={<Plus className="w-4 h-4" strokeWidth={1.8} />}
-                      >
-                        {savingProfile ? "Saving profile…" : "Add staff profile"}
-                      </Button>
-                    </form>
-                  </Card>
-
-                  {/* Rotate Super Admin Password */}
-                  <Card className="space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <h2 className="text-base font-semibold text-md-on-surface">
-                          Rotate Super Admin password
-                        </h2>
-                        <p className="text-xs text-md-on-surface-variant mt-0.5">
-                          Updates your salted scrypt password hash in MongoDB Atlas immediately.
-                        </p>
-                      </div>
-                      <StatusChip label="scrypt KDF" variant="success" />
-                    </div>
-                    <form onSubmit={handleChangeAdminPassword} className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <OutlinedTextField
-                          label="Current password"
-                          type="password"
-                          required
-                          value={currentAdminPassword}
-                          onChange={setCurrentAdminPassword}
-                        />
-                        <OutlinedTextField
-                          label="New password (min 8)"
-                          type="password"
-                          required
-                          value={nextAdminPassword}
-                          onChange={setNextAdminPassword}
-                        />
-                        <OutlinedTextField
-                          label="Confirm new password"
-                          type="password"
-                          required
-                          value={confirmAdminPassword}
-                          onChange={setConfirmAdminPassword}
-                        />
-                      </div>
-                      <Button
-                        type="submit"
-                        variant="tonal"
-                        disabled={savingAdminPassword}
-                        icon={<KeyRound className="w-4 h-4" strokeWidth={1.8} />}
-                      >
-                        {savingAdminPassword ? "Updating…" : "Update Super Admin password"}
-                      </Button>
-                    </form>
-                  </Card>
-
-                  {/* Existing Staff Profiles Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {users.map((u) => {
-                      const isSelf = u.id === currentUser.id;
-                      const adminCount = users.filter((x) => x.role === "ADMIN").length;
-                      const cannotRemove = isSelf || (u.role === "ADMIN" && adminCount <= 1);
-                      const isPasswordProfile =
-                        u.role === "ADMIN" || u.authType === "PASSWORD";
-                      return (
-                        <Card key={u.id} className="space-y-3 flex flex-col justify-between">
-                          <div className="space-y-2.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <StatusChip
-                                label={
-                                  u.role === "ADMIN"
-                                    ? "OWNER / SUPER ADMIN"
-                                    : u.role
-                                }
-                                variant={
-                                  u.role === "ADMIN"
-                                    ? "primary"
-                                    : u.role === "MANAGER"
-                                    ? "success"
-                                    : "neutral"
-                                }
-                              />
-                              <span className="font-mono text-xs text-md-on-surface-variant">
-                                {isPasswordProfile
-                                  ? "Password"
-                                  : `PIN: ${u.pin || "****"}`}
-                              </span>
-                            </div>
-                            <div>
-                              <div className="font-medium text-base text-md-on-surface">
-                                {u.name}
-                              </div>
-                              <div className="text-xs text-md-on-surface-variant">
-                                @{u.username || u.email.split("@")[0]} · {u.title} · {u.email}
-                              </div>
-                            </div>
-                            <div className="text-[11px] text-md-on-surface-variant pt-1">
-                              {u.role === "ADMIN"
-                                ? "Full access: Ledger, Deletes/Voids, MongoDB, PRA & Profiles"
-                                : u.role === "MANAGER"
-                                ? "POS, Discounts & Menu edits (No Ledger or Deletes)"
-                                : "POS Terminal & Read-only Catalog (No Ledger or Deletes)"}
-                            </div>
-                          </div>
-
-                          <div className="pt-2 border-t border-md-divider flex items-center justify-between">
-                            <span className="text-[11px] text-md-on-surface-variant">
-                              {isSelf ? "Active session holder" : "Workspace profile"}
-                            </span>
-                            {!cannotRemove && (
-                              <Button
-                                variant="text"
-                                size="sm"
-                                icon={<Trash2 className="w-3.5 h-3.5 text-md-error" strokeWidth={1.8} />}
-                                onClick={() => handleDeleteProfile(u.id, u.name)}
-                                className="text-md-error!"
-                              >
-                                Remove
-                              </Button>
-                            )}
-                          </div>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+              {settingsSubTab === "RESTAURANT_PROFILES" &&
+                canManageUsers &&
+                renderStaffProfilesSection(true)}
 
               {settingsSubTab === "ERP_AUDIT_COMPLIANCE" && canViewLedger && (
                 <Card className="p-0! overflow-hidden">
