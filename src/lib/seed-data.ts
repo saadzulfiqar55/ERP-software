@@ -10,17 +10,23 @@ import {
 export const INITIAL_USERS: UserProfile[] = [
   {
     id: "user-admin-1",
+    tenantId: "ten-stacklyra",
+    tenantSlug: "stacklyra",
+    branchId: "BRANCH_MAIN",
     name: "Saad",
     username: "saad",
     role: "ADMIN",
-    title: "Owner & Super Admin",
-    email: "saad@albarkarestaurant.pk",
+    membershipRole: "OWNER",
+    isPlatformAdmin: true,
+    title: "Platform Owner & Super Admin",
+    email: "saad@stacklyra.com",
     pin: "",
     authType: "PASSWORD",
     isDemoAccount: false,
-    // Salted scrypt hash for the default Super Admin password (overridable via ADMIN_PASSWORD env var)
-    passwordHash:
-      "scrypt$cf29d13218fd4a8a717131b2ea5846ee$a6c00c5fec6ca8a0839e9445047ca2c1d369f536e2dfd54235b54c41fda8b4db7b917df880bfc5f155bf43dba150ad5df50c3a8d79fc61f085e5acac8e54cfc7",
+    // No password is shipped in source. On a fresh install the Super Admin signs in with the
+    // ADMIN_USERNAME / ADMIN_PASSWORD environment variables, then rotates to a stored hash
+    // from Settings (which disables the env override).
+    passwordHash: undefined,
     avatarInitials: "SA",
     badgeColor: "crimson",
     permissions: {
@@ -35,7 +41,7 @@ export const INITIAL_USERS: UserProfile[] = [
 
 export const INITIAL_PRA_CONFIG: PRAConfig = {
   restaurantName: "StackLyra Workspace",
-  branchName: "",
+  branchName: "Main Branch",
   ntn: "",
   strn: "",
   posId: "",

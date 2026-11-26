@@ -17,7 +17,7 @@ export function middleware(request: NextRequest) {
     "Permissions-Policy",
     "camera=(), microphone=(), geolocation=()"
   );
-  response.headers.set("X-ERP-Tenant-Boundary", "TENANT_ALBARKA");
+  response.headers.set("X-ERP-Tenant-Boundary", "STACKLYRA_MULTI_TENANT_RLS");
 
   // Attach request path metadata for audit tracing
   if (request.nextUrl.pathname.startsWith("/api/")) {

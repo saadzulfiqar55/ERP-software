@@ -1,4 +1,4 @@
-import { appendAuditLog, DEFAULT_BRANCH_ID, DEFAULT_TENANT_ID } from "@/core/audit";
+import { appendAuditLog, DEFAULT_BRANCH_ID } from "@/core/audit";
 import { nextSequentialNumber } from "@/core/db";
 import {
   assertBalancedJournal,
@@ -6,6 +6,7 @@ import {
   subtractMinor,
   toMinorUnits,
 } from "@/core/money";
+import { assertTenantFeature } from "@/core/saas/entitlements";
 import { DatabaseSchema } from "@/lib/db";
 import {
   DoubleEntryLine,
@@ -16,8 +17,7 @@ import {
 
 export const AccountingService = {
   /**
-   * Enforces Fiscal Period Locking:
-   * Once a month is locked by accounting, no backdated invoices or vouchers can be posted to that period.
+   * Enforces Tenant-Isolated Fiscal Period Locking
    */
   assertFiscalPeriodOpen(txDb: DatabaseSchema, isoDate: string): void {
     const periodKey = isoDate.slice(0, 7); // "YYYY-MM"
@@ -47,6 +47,13 @@ export const AccountingService = {
     },
     actor: UserProfile
   ): LedgerEntry {
+    assertTenantFeature(
+      txDb.tenant,
+      "khata_ledger",
+      "Double-Entry Accounting & Khata Ledger"
+    );
+
+    const tenantId = txDb.tenant.id;
     const nowIso = new Date().toISOString();
     this.assertFiscalPeriodOpen(txDb, nowIso);
 
@@ -62,7 +69,6 @@ export const AccountingService = {
     const creditMinor = toMinorUnits(params.creditPkr);
     const netDeltaMinor = subtractMinor(debitMinor, creditMinor);
 
-    // Build Balanced Double-Entry Journal Lines (Sum Debits === Sum Credits)
     const journalLines: DoubleEntryLine[] =
       debitMinor > 0
         ? [
@@ -105,6 +111,7 @@ export const AccountingService = {
 
     txDb.parties[partyIndex] = {
       ...party,
+      tenantId,
       currentBalance: nextBalancePkr,
       currentBalanceMinor: nextBalanceMinor,
     };
@@ -115,8 +122,8 @@ export const AccountingService = {
 
     const entry: LedgerEntry = {
       id: `led-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-      tenantId: DEFAULT_TENANT_ID,
-      branchId: DEFAULT_BRANCH_ID,
+      tenantId,
+      branchId: actor.branchId || DEFAULT_BRANCH_ID,
       createdAt: nowIso,
       partyId: party.id,
       partyName: party.name,
@@ -138,6 +145,7 @@ export const AccountingService = {
     txDb.ledger = [entry, ...txDb.ledger];
 
     appendAuditLog(txDb, {
+      tenantId,
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,
@@ -153,7 +161,6 @@ export const AccountingService = {
 
   /**
    * Append-Only Reversal / Credit Note Generator
-   * Preserves the original voucher in the audit trail while posting an offsetting reversal entry.
    */
   reverseOrVoidEntry(
     txDb: DatabaseSchema,
@@ -161,6 +168,13 @@ export const AccountingService = {
     actor: UserProfile,
     removeOriginalFromView: boolean = false
   ): void {
+    assertTenantFeature(
+      txDb.tenant,
+      "khata_ledger",
+      "Double-Entry Accounting & Khata Ledger"
+    );
+
+    const tenantId = txDb.tenant.id;
     const targetIdx = txDb.ledger.findIndex((e) => e.id === entryId);
     if (targetIdx === -1) {
       throw new Error("Ledger entry not found.");
@@ -170,7 +184,6 @@ export const AccountingService = {
     this.assertFiscalPeriodOpen(txDb, original.createdAt);
 
     if (removeOriginalFromView) {
-      // Reverse balance on party and remove row while logging immutable audit record
       const reverseDelta = -(original.debit - original.credit);
       const pIdx = txDb.parties.findIndex((p) => p.id === original.partyId);
       if (pIdx !== -1) {
@@ -183,6 +196,7 @@ export const AccountingService = {
       }
       txDb.ledger = txDb.ledger.filter((e) => e.id !== entryId);
       appendAuditLog(txDb, {
+        tenantId,
         actorId: actor.id,
         actorName: actor.name,
         actorRole: actor.role,
@@ -195,7 +209,6 @@ export const AccountingService = {
       return;
     }
 
-    // Standard Append-Only Reversal Credit Note
     const revVoucherNo = nextSequentialNumber(
       txDb,
       "REVERSAL",
@@ -208,7 +221,7 @@ export const AccountingService = {
       txDb,
       {
         partyId: original.partyId,
-        debitPkr: original.credit, // Swap debit & credit to reverse
+        debitPkr: original.credit,
         creditPkr: original.debit,
         description: `REVERSAL CREDIT NOTE for ${original.voucherNo}: ${original.description}`,
         paymentMode: "REVERSAL_NOTE",
@@ -226,6 +239,7 @@ export const AccountingService = {
     partyId: string,
     actor: UserProfile
   ): void {
+    const tenantId = txDb.tenant.id;
     const party = txDb.parties.find((p) => p.id === partyId);
     if (!party) return;
 
@@ -236,6 +250,7 @@ export const AccountingService = {
     );
 
     appendAuditLog(txDb, {
+      tenantId,
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,

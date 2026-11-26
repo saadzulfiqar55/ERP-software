@@ -1,7 +1,8 @@
-import { appendAuditLog, DEFAULT_BRANCH_ID, DEFAULT_TENANT_ID } from "@/core/audit";
+import { appendAuditLog, DEFAULT_BRANCH_ID } from "@/core/audit";
 import { hasGranularPermission } from "@/core/auth";
 import { nextSequentialNumber } from "@/core/db";
 import { assertBalancedJournal, toMinorUnits } from "@/core/money";
+import { assertTenantFeature } from "@/core/saas/entitlements";
 import { DatabaseSchema } from "@/lib/db";
 import { buildPRAPayload, generatePRAInvoiceResponse } from "@/lib/pra-client";
 import { calculateSalesTax } from "@/lib/tax-calculator";
@@ -11,15 +12,15 @@ import { InventoryService } from "../inventory/inventory.service";
 
 export const POSService = {
   /**
-   * Executes a complete POS Sale inside an ACID Transaction:
-   * 1. Verifies Fiscal Period is OPEN and item list is valid
+   * Executes a complete POS Sale inside a Tenant-Scoped ACID Transaction:
+   * 1. Enforces SaaS Plan status (`assertTenantFeature("pos_terminal")`) & OPEN Fiscal Period
    * 2. Enforces `pos:discount:override` RBAC for discounts & resolves authoritative catalog prices
-   * 3. Generates atomic sequential Invoice Number & USIN (`DocumentCounters`)
+   * 3. Generates tenant-isolated sequential Invoice Number & USIN (`DocumentCounters`)
    * 4. Atomically deducts retail stock (`InventoryService.deductStockAtomic`)
    * 5. Computes authoritative server-side tax breakdown & snapshots historical unitCost/taxRate
    * 6. Verifies Double-Entry Accounting balance (`Sum Debits === Sum Credits`)
    * 7. Updates Customer Khata Ledger (if Credit Sale) & Cashier Shift register totals
-   * 8. Logs an immutable AuditLog entry
+   * 8. Logs an immutable tenant-scoped AuditLog entry
    */
   completeSaleTransaction(
     txDb: DatabaseSchema,
@@ -27,6 +28,8 @@ export const POSService = {
     body: any,
     actor: UserProfile
   ) {
+    assertTenantFeature(txDb.tenant, "pos_terminal", "POS Terminal Checkout");
+
     const rawItems = Array.isArray(body.items) ? (body.items as CartItem[]) : [];
     if (rawItems.length === 0) {
       throw new Error("POS order must include at least one item.");
@@ -45,13 +48,27 @@ export const POSService = {
     const createdAt = new Date().toISOString();
     AccountingService.assertFiscalPeriodOpen(txDb, createdAt);
 
+    const tenantId = txDb.tenant.id;
+    const invoicePrefix = txDb.tenant.invoicePrefix || "SL";
     const year = new Date().getFullYear();
-    const invoiceNumber = nextSequentialNumber(txDb, "INVOICE", "ALB", year);
+    const invoiceNumber = nextSequentialNumber(
+      txDb,
+      "INVOICE",
+      invoicePrefix,
+      year
+    );
     const usin = nextSequentialNumber(txDb, "USIN", "USIN", year);
 
     const paymentMethod = (body.paymentMethod || "CASH") as PaymentMethod;
+    if (paymentMethod === "KHATA_CREDIT") {
+      assertTenantFeature(
+        txDb.tenant,
+        "khata_ledger",
+        "Customer Khata Credit Billing"
+      );
+    }
 
-    // Resolve authoritative prices & taxMode from catalog, snapshotting unitCost & taxRate
+    // Resolve authoritative prices & taxMode from tenant catalog
     const appliedRate =
       paymentMethod === "CARD" || paymentMethod === "JAZZCASH_EASYPAISA"
         ? txDb.praConfig.cardTaxRate
@@ -59,9 +76,12 @@ export const POSService = {
 
     const snapshottedItems: CartItem[] = rawItems.map((item) => {
       const qty = Math.max(1, Math.round(Number(item.quantity) || 0));
-      const catalogProd = txDb.products.find((p) => p.id === item.productId);
+      const catalogProd = txDb.products.find(
+        (p) => p.id === item.productId && p.tenantId === tenantId
+      );
       const catalogVar = catalogProd?.variants.find((v) => v.id === item.variantId);
-      const authoritativePrice = catalogVar?.price ?? Math.max(0, Number(item.unitPrice) || 0);
+      const authoritativePrice =
+        catalogVar?.price ?? Math.max(0, Number(item.unitPrice) || 0);
       const authoritativeTaxMode = catalogProd?.taxMode ?? item.taxMode;
 
       return {
@@ -85,7 +105,7 @@ export const POSService = {
       typeof body.splitCashRatio === "number" ? body.splitCashRatio : 0.5
     );
 
-    // Atomic Inventory Deduction (throws InsufficientStockError if stock < requested)
+    // Atomic Inventory Deduction
     InventoryService.deductStockAtomic(txDb, snapshottedItems, actor);
 
     const draftOrder: Omit<
@@ -93,8 +113,8 @@ export const POSService = {
       "praInvoiceNumber" | "praQrPayload" | "praSyncStatus"
     > = {
       id: `ord-${Date.now()}`,
-      tenantId: DEFAULT_TENANT_ID,
-      branchId: DEFAULT_BRANCH_ID,
+      tenantId,
+      branchId: actor.branchId || DEFAULT_BRANCH_ID,
       idempotencyKey: body.idempotencyKey,
       invoiceNumber,
       usin,
@@ -166,7 +186,6 @@ export const POSService = {
       praResponseCode: fiscalResult.responseCode,
     };
 
-    // If paid on Customer Khata (Credit), post balanced voucher to AccountingService
     if (draftOrder.paymentMethod === "KHATA_CREDIT" && draftOrder.khataAccountId) {
       AccountingService.postVoucher(
         txDb,
@@ -183,7 +202,6 @@ export const POSService = {
       );
     }
 
-    // Update Active Cashier Shift / Register Session
     if (txDb.cashierShifts && txDb.cashierShifts.length > 0) {
       const netCashCollectedMinor = toMinorUnits(
         Math.max(0, draftOrder.cashPaid - draftOrder.changeReturned)
@@ -206,6 +224,7 @@ export const POSService = {
     txDb.orders = [newOrder, ...txDb.orders];
 
     appendAuditLog(txDb, {
+      tenantId,
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,

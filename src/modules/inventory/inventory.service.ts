@@ -1,4 +1,9 @@
-import { appendAuditLog, DEFAULT_BRANCH_ID, DEFAULT_TENANT_ID } from "@/core/audit";
+import { appendAuditLog, DEFAULT_BRANCH_ID } from "@/core/audit";
+import {
+  assertTenantFeature,
+  assertTenantProductQuota,
+  assertTenantWriteActive,
+} from "@/core/saas/entitlements";
 import { DatabaseSchema } from "@/lib/db";
 import { CartItem, Product, UserProfile } from "@/lib/types";
 
@@ -13,7 +18,7 @@ export class InsufficientStockError extends Error {
 
 export const InventoryService = {
   /**
-   * Returns active (non-archived) products mapped as safe DTOs
+   * Returns active (non-archived) products scoped to the active tenant
    */
   listActiveProducts(db: DatabaseSchema): Product[] {
     return db.products.filter((p) => !p.isArchived);
@@ -21,14 +26,13 @@ export const InventoryService = {
 
   /**
    * Atomic Anti-Overselling Inventory Deduction
-   * Verifies `stockQty >= requestedQty` for all retail items before mutating state inside the transaction.
    */
   deductStockAtomic(
     txDb: DatabaseSchema,
     items: CartItem[],
     actor: UserProfile
   ): void {
-    // Group requested quantities by productId
+    const tenantId = txDb.tenant.id;
     const qtyByProduct = new Map<string, number>();
     for (const item of items) {
       qtyByProduct.set(
@@ -37,9 +41,10 @@ export const InventoryService = {
       );
     }
 
-    // 1. Atomic Guard Pass: Verify all retail items have sufficient stockOnHand
     for (const [productId, requestedQty] of qtyByProduct.entries()) {
-      const product = txDb.products.find((p) => p.id === productId && !p.isArchived);
+      const product = txDb.products.find(
+        (p) => p.id === productId && !p.isArchived
+      );
       if (!product) continue;
 
       if (product.segment === "RETAIL" && product.stockQty < requestedQty) {
@@ -51,12 +56,12 @@ export const InventoryService = {
       }
     }
 
-    // 2. Atomic Deduction Pass
     txDb.products = txDb.products.map((product) => {
       const requestedQty = qtyByProduct.get(product.id) || 0;
       if (requestedQty > 0 && product.segment === "RETAIL") {
         const nextStock = product.stockQty - requestedQty;
         appendAuditLog(txDb, {
+          tenantId,
           actorId: actor.id,
           actorName: actor.name,
           actorRole: actor.role,
@@ -68,6 +73,7 @@ export const InventoryService = {
         });
         return {
           ...product,
+          tenantId,
           stockQty: nextStock,
         };
       }
@@ -76,7 +82,7 @@ export const InventoryService = {
   },
 
   /**
-   * Creates or updates a product in the catalog with audit logging
+   * Creates or updates a product in the tenant's catalog with plan quota enforcement
    */
   upsertProduct(
     txDb: DatabaseSchema,
@@ -84,10 +90,22 @@ export const InventoryService = {
     isEdit: boolean,
     actor: UserProfile
   ): void {
+    assertTenantFeature(
+      txDb.tenant,
+      "inventory_catalog",
+      "Inventory & Menu Catalog"
+    );
+
+    const tenantId = txDb.tenant.id;
+    if (!isEdit) {
+      const activeCount = txDb.products.filter((p) => !p.isArchived).length;
+      assertTenantProductQuota(txDb.tenant, activeCount);
+    }
+
     const enriched: Product = {
       ...product,
-      tenantId: DEFAULT_TENANT_ID,
-      branchId: DEFAULT_BRANCH_ID,
+      tenantId,
+      branchId: actor.branchId || DEFAULT_BRANCH_ID,
       isArchived: false,
     };
 
@@ -96,6 +114,7 @@ export const InventoryService = {
         p.id === enriched.id ? enriched : p
       );
       appendAuditLog(txDb, {
+        tenantId,
         actorId: actor.id,
         actorName: actor.name,
         actorRole: actor.role,
@@ -108,6 +127,7 @@ export const InventoryService = {
     } else {
       txDb.products = [enriched, ...txDb.products];
       appendAuditLog(txDb, {
+        tenantId,
         actorId: actor.id,
         actorName: actor.name,
         actorRole: actor.role,
@@ -121,14 +141,15 @@ export const InventoryService = {
   },
 
   /**
-   * Soft-Archives a product (`isArchived: true`) instead of destructive hard delete
-   * so historical invoices and tax audits remain intact.
+   * Soft-Archives a product (`isArchived: true`)
    */
   archiveProductSoft(
     txDb: DatabaseSchema,
     productId: string,
     actor: UserProfile
   ): void {
+    assertTenantWriteActive(txDb.tenant);
+    const tenantId = txDb.tenant.id;
     const target = txDb.products.find((p) => p.id === productId);
     if (!target) return;
 
@@ -139,6 +160,7 @@ export const InventoryService = {
     );
 
     appendAuditLog(txDb, {
+      tenantId,
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,

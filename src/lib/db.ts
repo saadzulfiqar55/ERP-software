@@ -1,5 +1,8 @@
-import fs from "fs";
-import path from "path";
+import { buildTenantSubscription } from "@/core/saas/entitlements";
+import {
+  DEFAULT_TENANT_ID,
+  DEFAULT_TENANT_SLUG,
+} from "@/core/audit";
 import {
   INITIAL_LEDGER,
   INITIAL_ORDERS,
@@ -9,15 +12,18 @@ import {
   INITIAL_USERS,
 } from "./seed-data";
 import {
-  DEFAULT_ISOLATED_DB_NAME,
-  hasUnreplacedPasswordPlaceholder,
-  loadSnapshotFromMongo,
-  maskMongoUri,
-  MongoSyncSection,
-  normalizeMongoUri,
-  resolveIsolatedDbName,
-  syncSnapshotToMongoIfAvailable,
-} from "./mongodb";
+  findTenantIdsForUser,
+  findTenantRow,
+  getReadySql,
+  isUsablePostgresUri,
+  listTenantRows,
+  loadTenantState,
+  lockTenant,
+  maskPostgresUri,
+  normalizePostgresUri,
+  Queryable,
+  saveTenantDiff,
+} from "./postgres";
 import {
   ERPInvoice,
   INITIAL_ERP_INVOICES,
@@ -40,10 +46,21 @@ import {
   PRAConfig,
   Product,
   SessionAuditLog,
+  SubscriptionPlanId,
+  TenantOrganization,
   UserProfile,
 } from "./types";
 
+/**
+ * StackLyra ERP data access.
+ *
+ * PostgreSQL (`DATABASE_URL`) is the single source of truth. There is no local JSON store
+ * and no in-process cache: every read goes to the database, and every write goes through
+ * `runTenantTransaction`, which locks the tenant, loads its state inside the transaction,
+ * applies the change and writes back only what changed.
+ */
 export interface DatabaseSchema {
+  tenant: TenantOrganization;
   praConfig: PRAConfig;
   mongoConfig: MongoDBConfig;
   products: Product[];
@@ -52,6 +69,7 @@ export interface DatabaseSchema {
   parties: PartyAccount[];
   ledger: LedgerEntry[];
   users: UserProfile[];
+  /** Not persisted: per-request view only (sessions are stateless JWTs). */
   activeSession: ActiveSession | null;
   sessionAuditLogs: SessionAuditLog[];
   immutableAuditLogs: ImmutableAuditLog[];
@@ -65,152 +83,171 @@ export interface DatabaseSchema {
   servers?: string[];
 }
 
-const IS_SERVERLESS = Boolean(
-  process.env.VERCEL ||
-    process.env.VERCEL_ENV ||
-    process.env.AWS_LAMBDA_FUNCTION_NAME ||
-    process.env.NETLIFY ||
-    process.cwd().startsWith("/var/task")
-);
-const DB_DIR = IS_SERVERLESS
-  ? path.join("/tmp", "albarka-data")
-  : path.join(process.cwd(), "data");
-const DB_FILE = path.join(DB_DIR, "albarka-db.json");
-const DB_BACKUP_FILE = path.join(DB_DIR, "albarka-db.json.bak");
-const ENV_LOCAL_FILE = path.join(process.cwd(), ".env.local");
-
-function readDotEnvLocalValue(key: string): string | undefined {
-  try {
-    if (!fs.existsSync(ENV_LOCAL_FILE)) return undefined;
-    const raw = fs.readFileSync(ENV_LOCAL_FILE, "utf-8");
-    const regex = new RegExp(`^${key}=(?:"([^"]*)"|'([^']*)'|([^\\r\\n#]*))`, "m");
-    const match = raw.match(regex);
-    const val = match?.[1] ?? match?.[2] ?? match?.[3];
-    return val?.trim() || undefined;
-  } catch {
-    return undefined;
+export class TenantNotFoundError extends Error {
+  constructor(identifier: string) {
+    super(`Workspace "${identifier}" not found.`);
+    this.name = "TenantNotFoundError";
   }
 }
 
-function getEnvMongoConfig(): MongoDBConfig | null {
-  const envUri = normalizeMongoUri(
-    process.env.MONGODB_URI || readDotEnvLocalValue("MONGODB_URI")
-  );
-  if (!envUri) return null;
-
-  const envDbName =
-    process.env.MONGODB_DB_NAME?.trim() ||
-    readDotEnvLocalValue("MONGODB_DB_NAME");
-
-  let safeDb = DEFAULT_ISOLATED_DB_NAME;
-  try {
-    safeDb = resolveIsolatedDbName(envDbName);
-  } catch {
-    safeDb = DEFAULT_ISOLATED_DB_NAME;
-  }
-
-  const needsPassword = hasUnreplacedPasswordPlaceholder(envUri);
+/** Status of the platform database, shown in Settings (URI only ever comes from the env). */
+export function getEnvDatabaseConfig(): MongoDBConfig {
+  const uri = normalizePostgresUri(process.env.DATABASE_URL);
+  const usable = isUsablePostgresUri(uri);
   return {
-    enabled: !needsPassword,
-    uri: envUri,
-    dbName: safeDb,
-    lastStatus: needsPassword
-      ? `Atlas URI detected in .env.local (isolated DB: ${safeDb}) — replace <db_password> with your MongoDB password to connect.`
-      : `Configured via .env.local (isolated DB: ${safeDb})`,
+    enabled: usable,
+    uri,
+    dbName: "postgres",
+    engine: "POSTGRES_DRIZZLE",
+    lastStatus: usable
+      ? "PostgreSQL connected — single source of truth for all workspace data."
+      : "DATABASE_URL is missing or still a placeholder. The app cannot load or save data until it is set.",
   };
 }
-
-const DEFAULT_MONGO_CONFIG: MongoDBConfig = getEnvMongoConfig() || {
-  enabled: false,
-  uri: "mongodb://127.0.0.1:27017/albarka_erp",
-  dbName: DEFAULT_ISOLATED_DB_NAME,
-  lastStatus:
-    "Local JSON File Store Active (data/albarka-db.json) — MongoDB Ready",
-};
 
 export function getPublicMongoConfig(config: MongoDBConfig): MongoDBConfig {
   return {
     ...config,
-    uri: maskMongoUri(config.uri),
+    uri: maskPostgresUri(config.uri),
   };
 }
 
-const DEFAULT_FISCAL_PERIODS: FiscalPeriod[] = [
-  {
-    periodKey: new Date().toISOString().slice(0, 7),
-    label: `${new Date().toLocaleDateString("en-US", {
-      month: "long",
-      year: "numeric",
-    })} (Active Period)`,
-    isLocked: false,
-  },
-];
-
-function buildDefaults(): DatabaseSchema {
-  const currentYear = new Date().getFullYear();
+export function buildDefaultFlagshipTenant(): TenantOrganization {
+  const now = new Date().toISOString();
   return {
-    praConfig: INITIAL_PRA_CONFIG,
-    mongoConfig: DEFAULT_MONGO_CONFIG,
-    products: INITIAL_PRODUCTS,
-    orders: INITIAL_ORDERS,
-    erpInvoices: INITIAL_ERP_INVOICES,
-    parties: INITIAL_PARTIES,
-    ledger: INITIAL_LEDGER,
-    users: INITIAL_USERS,
+    id: DEFAULT_TENANT_ID,
+    slug: DEFAULT_TENANT_SLUG,
+    name: "StackLyra Workspace",
+    segment: "HYBRID",
+    invoicePrefix: "SL",
+    ownerUserId: "user-admin-1",
+    ownerEmail: "saad@stacklyra.com",
+    status: "ACTIVE",
+    planId: "enterprise",
+    subscription: buildTenantSubscription(
+      "enterprise",
+      "ACTIVE",
+      "ANNUAL",
+      "MANUAL_IBFT"
+    ),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function buildDefaultFiscalPeriods(tenantId: string): FiscalPeriod[] {
+  return [
+    {
+      tenantId,
+      periodKey: new Date().toISOString().slice(0, 7),
+      label: `${new Date().toLocaleDateString("en-US", {
+        month: "long",
+        year: "numeric",
+      })} (Active Period)`,
+      isLocked: false,
+    },
+  ];
+}
+
+export function buildTenantDefaults(
+  tenant: TenantOrganization,
+  initialOwner?: UserProfile
+): DatabaseSchema {
+  const currentYear = new Date().getFullYear();
+  const isFlagship = tenant.id === DEFAULT_TENANT_ID;
+  const defaultUsers: UserProfile[] = initialOwner
+    ? [initialOwner]
+    : isFlagship
+    ? INITIAL_USERS
+    : [];
+
+  return {
+    tenant,
+    praConfig: {
+      ...INITIAL_PRA_CONFIG,
+      restaurantName: tenant.name || "StackLyra Workspace",
+    },
+    mongoConfig: getEnvDatabaseConfig(),
+    products: isFlagship ? INITIAL_PRODUCTS : [],
+    orders: isFlagship ? INITIAL_ORDERS : [],
+    erpInvoices: isFlagship ? INITIAL_ERP_INVOICES : [],
+    parties: isFlagship ? INITIAL_PARTIES : [],
+    ledger: isFlagship ? INITIAL_LEDGER : [],
+    users: defaultUsers,
     activeSession: null,
     sessionAuditLogs: [],
     immutableAuditLogs: [],
     idempotencyRecords: [],
     documentCounters: [
-      { key: `TENANT_ALBARKA:INVOICE:${currentYear}`, seq: 0 },
-      { key: `TENANT_ALBARKA:USIN:${currentYear}`, seq: 0 },
-      { key: `TENANT_ALBARKA:VOUCHER:${currentYear}`, seq: 0 },
+      { tenantId: tenant.id, key: `${tenant.id}:INVOICE:${currentYear}`, seq: 0 },
+      { tenantId: tenant.id, key: `${tenant.id}:USIN:${currentYear}`, seq: 0 },
+      { tenantId: tenant.id, key: `${tenant.id}:VOUCHER:${currentYear}`, seq: 0 },
     ],
     cashierShifts: [],
-    fiscalPeriods: DEFAULT_FISCAL_PERIODS,
-    waitingTasks: INITIAL_WAITING_TASKS,
-    stockMonitor: INITIAL_STOCK_MONITOR,
+    fiscalPeriods: buildDefaultFiscalPeriods(tenant.id),
+    waitingTasks: isFlagship ? INITIAL_WAITING_TASKS : [],
+    stockMonitor: isFlagship ? INITIAL_STOCK_MONITOR : [],
     restaurantTables: [],
     servers: [],
   };
 }
 
-function mergeWithDefaults(
+function mergeWithTenantDefaults(
+  tenant: TenantOrganization,
   parsed: Partial<DatabaseSchema>,
-  envMongo: MongoDBConfig | null
+  envDbConfig: MongoDBConfig
 ): DatabaseSchema {
-  const defaults = buildDefaults();
+  const defaults = buildTenantDefaults(tenant);
   const seededAdmin = INITIAL_USERS.find((u) => u.id === "user-admin-1");
+  const isFlagship = tenant.id === DEFAULT_TENANT_ID;
 
-  // Upgrade any legacy ADMIN record loaded from existing JSON / MongoDB snapshots
-  // so weak 4-digit PIN auth (`1111`) is permanently replaced with scrypt password auth.
   const rawUsers =
-    parsed.users && parsed.users.length > 0 ? parsed.users : INITIAL_USERS;
+    parsed.users && parsed.users.length > 0 ? parsed.users : defaults.users;
+
   const normalizedUsers = rawUsers.map((u) => {
+    const stampedTenantId = u.tenantId && u.tenantId !== "TENANT_ALBARKA" ? u.tenantId : tenant.id;
     if (u.role === "ADMIN") {
-      const isLegacyPrimaryAdmin =
-        u.id === "user-admin-1" && u.name === "Haji Tariq Mahmood";
+      const isPrimaryFlagshipAdmin = isFlagship && u.id === "user-admin-1";
       const envAdminUsername = process.env.ADMIN_USERNAME?.trim().toLowerCase();
       return {
         ...u,
-        name: isLegacyPrimaryAdmin ? "Saad" : u.name,
+        tenantId: stampedTenantId,
+        tenantSlug: tenant.slug,
+        membershipRole: u.membershipRole || ("OWNER" as const),
+        isPlatformAdmin: isPrimaryFlagshipAdmin ? true : Boolean(u.isPlatformAdmin),
+        name:
+          isPrimaryFlagshipAdmin && u.name === "Haji Tariq Mahmood"
+            ? "Saad"
+            : u.name,
         username:
-          (u.id === "user-admin-1" ? envAdminUsername : undefined) ||
+          (isPrimaryFlagshipAdmin ? envAdminUsername : undefined) ||
           u.username ||
-          (u.id === "user-admin-1" ? "saad" : u.email.split("@")[0]),
+          (isPrimaryFlagshipAdmin ? "saad" : u.email.split("@")[0]),
         email:
-          isLegacyPrimaryAdmin && u.email === "admin@albarkarestaurant.pk"
-            ? "saad@albarkarestaurant.pk"
+          isPrimaryFlagshipAdmin &&
+          (u.email === "admin@albarkarestaurant.pk" ||
+            u.email === "saad@albarkarestaurant.pk")
+            ? "saad@stacklyra.com"
             : u.email,
-        avatarInitials: isLegacyPrimaryAdmin ? "SA" : u.avatarInitials,
+        avatarInitials:
+          isPrimaryFlagshipAdmin && u.name === "Haji Tariq Mahmood"
+            ? "SA"
+            : u.avatarInitials,
         pin: "",
         authType: "PASSWORD" as const,
         isDemoAccount: false,
-        passwordHash: u.passwordHash || seededAdmin?.passwordHash,
+        passwordHash:
+          u.passwordHash ||
+          (isPrimaryFlagshipAdmin ? seededAdmin?.passwordHash : undefined),
       };
     }
     return {
       ...u,
+      tenantId: stampedTenantId,
+      tenantSlug: tenant.slug,
+      membershipRole:
+        u.membershipRole || (u.role === "MANAGER" ? "MANAGER" : "CASHIER"),
+      isPlatformAdmin: false,
       username: u.username || u.email.split("@")[0],
       authType: u.authType || ("PIN" as const),
       isDemoAccount: false,
@@ -220,17 +257,51 @@ function mergeWithDefaults(
   return {
     ...defaults,
     ...parsed,
+    tenant,
+    praConfig: {
+      ...defaults.praConfig,
+      ...(parsed.praConfig || {}),
+      restaurantName:
+        parsed.praConfig?.restaurantName &&
+        parsed.praConfig.restaurantName !== "Albarka Karahi & Handi"
+          ? parsed.praConfig.restaurantName
+          : tenant.name,
+    },
     users: normalizedUsers,
+    products: (parsed.products ?? defaults.products).map((p) => ({
+      ...p,
+      tenantId: tenant.id,
+    })),
+    orders: (parsed.orders ?? defaults.orders).map((o) => ({
+      ...o,
+      tenantId: tenant.id,
+    })),
     erpInvoices: parsed.erpInvoices ?? defaults.erpInvoices,
-    mongoConfig: envMongo || parsed.mongoConfig || DEFAULT_MONGO_CONFIG,
+    parties: (parsed.parties ?? defaults.parties).map((pt) => ({
+      ...pt,
+      tenantId: tenant.id,
+    })),
+    ledger: (parsed.ledger ?? defaults.ledger).map((le) => ({
+      ...le,
+      tenantId: tenant.id,
+    })),
+    mongoConfig: envDbConfig,
     sessionAuditLogs: parsed.sessionAuditLogs || [],
-    immutableAuditLogs: parsed.immutableAuditLogs ?? defaults.immutableAuditLogs,
+    immutableAuditLogs: (
+      parsed.immutableAuditLogs ?? defaults.immutableAuditLogs
+    ).map((al) => ({
+      ...al,
+      tenantId: tenant.id,
+    })),
     idempotencyRecords: parsed.idempotencyRecords || [],
     documentCounters: parsed.documentCounters ?? defaults.documentCounters,
-    cashierShifts: parsed.cashierShifts ?? defaults.cashierShifts,
+    cashierShifts: (parsed.cashierShifts ?? defaults.cashierShifts).map((cs) => ({
+      ...cs,
+      tenantId: tenant.id,
+    })),
     fiscalPeriods:
       parsed.fiscalPeriods && parsed.fiscalPeriods.length > 0
-        ? parsed.fiscalPeriods
+        ? parsed.fiscalPeriods.map((fp) => ({ ...fp, tenantId: tenant.id }))
         : defaults.fiscalPeriods,
     waitingTasks: parsed.waitingTasks ?? defaults.waitingTasks,
     stockMonitor: parsed.stockMonitor ?? defaults.stockMonitor,
@@ -239,180 +310,238 @@ function mergeWithDefaults(
   };
 }
 
-function cleanupOrphanedTmpFiles(): void {
-  try {
-    if (!fs.existsSync(DB_DIR)) return;
-    for (const entry of fs.readdirSync(DB_DIR)) {
-      if (entry.startsWith("albarka-db.json.tmp.")) {
-        try {
-          fs.unlinkSync(path.join(DB_DIR, entry));
-        } catch {
-          // Best-effort temp cleanup
-        }
-      }
-    }
-  } catch {
-    // Ignore
-  }
+// ---------------------------------------------------------------------------
+// Readiness: schema + flagship tenant
+// ---------------------------------------------------------------------------
+
+async function ensureFlagshipTenant(sql: Awaited<ReturnType<typeof getReadySql>>) {
+  await sql.begin(async (tx) => {
+    await lockTenant(tx, DEFAULT_TENANT_ID);
+    const existing = await findTenantRow(tx, DEFAULT_TENANT_ID);
+    if (existing) return;
+    const flagship = buildDefaultFlagshipTenant();
+    await saveTenantDiff(tx, null, buildTenantDefaults(flagship));
+  });
+}
+
+async function getDb() {
+  return getReadySql(ensureFlagshipTenant);
+}
+
+// ---------------------------------------------------------------------------
+// Tenant registry (stacklyra_tenants)
+// ---------------------------------------------------------------------------
+
+export async function listTenantsRegistry(): Promise<TenantOrganization[]> {
+  return listTenantRows(await getDb());
+}
+
+/** Exact match on tenant id or slug; null when no such workspace exists. */
+export async function findTenantStrict(
+  identifier: string
+): Promise<TenantOrganization | null> {
+  if (!identifier?.trim()) return null;
+  return findTenantRow(await getDb(), identifier);
+}
+
+// ---------------------------------------------------------------------------
+// Reads
+// ---------------------------------------------------------------------------
+
+async function loadMergedState(
+  q: Queryable,
+  tenantId: string
+): Promise<DatabaseSchema> {
+  const stored = await loadTenantState(q, tenantId);
+  if (!stored) throw new TenantNotFoundError(tenantId);
+  return mergeWithTenantDefaults(stored.tenant, stored, getEnvDatabaseConfig());
 }
 
 /**
- * Crash-safe atomic disk writer:
- * 1. Serializes full JSON to a temp file and calls `fsyncSync` to flush OS buffers.
- * 2. Preserves the last known-good snapshot in `.bak`.
- * 3. Atomically renames the temp file into `albarka-db.json`.
+ * Read-only snapshot of a tenant (no lock). Use only for responses; never write it back.
+ * Throws TenantNotFoundError for an unknown tenant instead of falling back to another one.
  */
-function writeJsonAtomic(filePath: string, payload: DatabaseSchema): void {
-  if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
-  }
-  const serialized = JSON.stringify(payload, null, 2);
-  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  const fd = fs.openSync(tmpPath, "w");
-  try {
-    fs.writeSync(fd, serialized, 0, "utf-8");
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-
-  if (fs.existsSync(filePath)) {
-    try {
-      const existingRaw = fs.readFileSync(filePath, "utf-8");
-      JSON.parse(existingRaw); // Only back up valid JSON
-      fs.copyFileSync(filePath, DB_BACKUP_FILE);
-    } catch {
-      // Existing file is corrupt/incomplete; preserve previous good .bak untouched
-    }
-  }
-
-  fs.renameSync(tmpPath, filePath);
+export async function readDbAsync(
+  tenantId: string = DEFAULT_TENANT_ID
+): Promise<DatabaseSchema> {
+  const sql = await getDb();
+  const tenant = await findTenantRow(sql, tenantId);
+  if (!tenant) throw new TenantNotFoundError(tenantId);
+  return loadMergedState(sql, tenant.id);
 }
 
-export function readDb(): DatabaseSchema {
-  const defaults = buildDefaults();
-  cleanupOrphanedTmpFiles();
-
-  try {
-    if (!fs.existsSync(DB_DIR)) {
-      fs.mkdirSync(DB_DIR, { recursive: true });
-    }
-    if (!fs.existsSync(DB_FILE)) {
-      if (fs.existsSync(DB_BACKUP_FILE)) {
-        try {
-          const bakRaw = fs.readFileSync(DB_BACKUP_FILE, "utf-8");
-          const bakParsed = JSON.parse(bakRaw) as Partial<DatabaseSchema>;
-          const recovered = mergeWithDefaults(bakParsed, getEnvMongoConfig());
-          writeJsonAtomic(DB_FILE, recovered);
-          return recovered;
-        } catch {
-          // Backup unreadable; seed defaults
-        }
-      }
-      writeJsonAtomic(DB_FILE, defaults);
-      return defaults;
-    }
-
-    try {
-      const raw = fs.readFileSync(DB_FILE, "utf-8");
-      const parsed = JSON.parse(raw) as Partial<DatabaseSchema>;
-      return mergeWithDefaults(parsed, getEnvMongoConfig());
-    } catch {
-      // Primary JSON corrupted by sudden power loss -> recover transparently from `.bak`
-      if (fs.existsSync(DB_BACKUP_FILE)) {
-        const bakRaw = fs.readFileSync(DB_BACKUP_FILE, "utf-8");
-        const bakParsed = JSON.parse(bakRaw) as Partial<DatabaseSchema>;
-        const recovered = mergeWithDefaults(bakParsed, getEnvMongoConfig());
-        writeJsonAtomic(DB_FILE, recovered);
-        return recovered;
-      }
-      return defaults;
-    }
-  } catch {
-    return defaults;
-  }
-}
-
-export function writeDb(data: DatabaseSchema): void {
-  try {
-    writeJsonAtomic(DB_FILE, data);
-  } catch {
-    // Serverless environments with read-only filesystems rely on MongoDB Atlas persistence
-  }
-}
-
-declare global {
-  // Short-lived per-instance warm cache to avoid repeated remote MongoDB snapshot reads on rapid CRUD bursts
-  // eslint-disable-next-line no-var
-  var __stacklyraWarmDb:
-    | { snapshot: DatabaseSchema; cachedAt: number }
-    | undefined;
-}
-
-const WARM_CACHE_TTL_MS = 15_000;
+// ---------------------------------------------------------------------------
+// Writes
+// ---------------------------------------------------------------------------
 
 /**
- * MongoDB-first async state loader for serverless deployments (Vercel) and local Node.
- * Falls back transparently to local JSON store if MongoDB is disabled or unreachable.
+ * Runs `work` against a draft of the tenant's state inside one Postgres transaction:
+ * lock tenant → load → work(draft) → write changed rows → commit.
+ * If `work` throws, or any write fails, the transaction rolls back and the error propagates.
  */
-export async function readDbAsync(): Promise<DatabaseSchema> {
-  const warm = globalThis.__stacklyraWarmDb;
-  if (warm && Date.now() - warm.cachedAt < WARM_CACHE_TTL_MS) {
-    return warm.snapshot;
-  }
+export async function runTenantTransaction<T>(
+  tenantId: string,
+  work: (txDb: DatabaseSchema) => Promise<T> | T
+): Promise<{ result: T; db: DatabaseSchema }> {
+  const sql = await getDb();
+  const tenant = await findTenantRow(sql, tenantId);
+  if (!tenant) throw new TenantNotFoundError(tenantId);
 
-  const envMongo = getEnvMongoConfig();
-  const localSnapshot = readDb();
-  const activeMongo =
-    envMongo?.enabled && envMongo.uri
-      ? envMongo
-      : localSnapshot.mongoConfig?.enabled && localSnapshot.mongoConfig?.uri
-      ? localSnapshot.mongoConfig
-      : null;
-
-  if (activeMongo) {
-    const remote = await loadSnapshotFromMongo(
-      activeMongo.uri,
-      activeMongo.dbName
-    );
-    if (remote) {
-      const merged = mergeWithDefaults(remote, {
-        ...activeMongo,
-        lastStatus: `MongoDB Atlas Connected (isolated DB: ${activeMongo.dbName})`,
-      });
-      globalThis.__stacklyraWarmDb = {
-        snapshot: merged,
-        cachedAt: Date.now(),
-      };
-      return merged;
+  const outcome = await sql.begin(async (tx) => {
+    await lockTenant(tx, tenant.id);
+    const before = await loadMergedState(tx, tenant.id);
+    const draft: DatabaseSchema = JSON.parse(JSON.stringify(before));
+    const result = await work(draft);
+    if (draft.tenant.id !== tenant.id) {
+      throw new Error("A transaction may not change the tenant id.");
     }
+    await saveTenantDiff(tx, before, draft);
+    return { result, db: draft };
+  });
+  return outcome as { result: T; db: DatabaseSchema };
+}
+
+/**
+ * Resolves a user by id or username/email, optionally within one workspace.
+ * Uses indexed lookups instead of loading every tenant.
+ */
+export async function findUserAcrossTenantsAsync(params: {
+  tenantSlug?: string;
+  userId?: string;
+  identifier?: string;
+}): Promise<{ tenant: TenantOrganization; user: UserProfile; db: DatabaseSchema } | null> {
+  const sql = await getDb();
+
+  let scopedTenantId: string | undefined;
+  if (params.tenantSlug) {
+    const scoped = await findTenantRow(sql, params.tenantSlug);
+    if (!scoped) return null;
+    scopedTenantId = scoped.id;
   }
 
-  globalThis.__stacklyraWarmDb = {
-    snapshot: localSnapshot,
-    cachedAt: Date.now(),
+  const identifier = params.identifier?.trim().toLowerCase();
+  const envAdminUsername = process.env.ADMIN_USERNAME?.trim().toLowerCase();
+
+  const candidateIds = await findTenantIdsForUser(sql, {
+    tenantId: scopedTenantId,
+    userId: params.userId,
+    identifier,
+  });
+  // The flagship admin may sign in with ADMIN_USERNAME even if the stored username differs.
+  if (
+    identifier &&
+    envAdminUsername &&
+    identifier === envAdminUsername &&
+    (!scopedTenantId || scopedTenantId === DEFAULT_TENANT_ID) &&
+    !candidateIds.includes(DEFAULT_TENANT_ID)
+  ) {
+    candidateIds.push(DEFAULT_TENANT_ID);
+  }
+
+  for (const tenantId of candidateIds) {
+    const db = await loadMergedState(sql, tenantId);
+    let found: UserProfile | undefined;
+    if (params.userId) {
+      found = db.users.find((u) => u.id === params.userId);
+    }
+    if (!found && identifier) {
+      found = db.users.find(
+        (u) =>
+          u.username?.toLowerCase() === identifier ||
+          u.email.toLowerCase() === identifier
+      );
+      if (
+        !found &&
+        tenantId === DEFAULT_TENANT_ID &&
+        envAdminUsername &&
+        identifier === envAdminUsername
+      ) {
+        found = db.users.find((u) => u.id === "user-admin-1");
+      }
+    }
+    if (found) return { tenant: db.tenant, user: found, db };
+  }
+  return null;
+}
+
+/**
+ * Creates a new tenant workspace and its owner in a single transaction.
+ * The primary key and the UNIQUE slug constraint make a taken slug fail atomically.
+ */
+export async function provisionNewTenantWorkspaceAsync(params: {
+  organizationName: string;
+  slug: string;
+  segment: "RESTAURANT" | "RETAIL" | "HYBRID";
+  planId: SubscriptionPlanId;
+  ownerUser: UserProfile;
+  invoicePrefix?: string;
+}): Promise<{ tenant: TenantOrganization; db: DatabaseSchema }> {
+  const sql = await getDb();
+  const takenMessage = `Workspace slug "${params.slug}" is already taken. Choose another workspace URL.`;
+
+  const now = new Date().toISOString();
+  const tenantId = `ten-${params.slug}`;
+  const prefix =
+    params.invoicePrefix ||
+    params.organizationName
+      .replace(/[^a-zA-Z]/g, "")
+      .slice(0, 3)
+      .toUpperCase() ||
+    "SL";
+
+  const tenant: TenantOrganization = {
+    id: tenantId,
+    slug: params.slug,
+    name: params.organizationName,
+    segment: params.segment,
+    invoicePrefix: prefix,
+    ownerUserId: params.ownerUser.id,
+    ownerEmail: params.ownerUser.email,
+    status: "TRIALING",
+    planId: params.planId,
+    subscription: buildTenantSubscription(params.planId, "TRIALING", "MONTHLY", "TRIAL"),
+    createdAt: now,
+    updatedAt: now,
   };
-  return localSnapshot;
-}
 
-/**
- * Persists state to MongoDB Atlas (authoritative in production/Vercel) and best-effort JSON cache.
- */
-export async function writeDbAsync(
-  data: DatabaseSchema,
-  sections?: MongoSyncSection[]
-): Promise<void> {
-  globalThis.__stacklyraWarmDb = {
-    snapshot: data,
-    cachedAt: Date.now(),
+  const ownerWithTenant: UserProfile = {
+    ...params.ownerUser,
+    tenantId: tenant.id,
+    tenantSlug: tenant.slug,
+    membershipRole: "OWNER",
+    isPlatformAdmin: false,
   };
-  writeDb(data);
-  if (data.mongoConfig?.enabled && data.mongoConfig?.uri) {
-    await syncSnapshotToMongoIfAvailable(
-      data.mongoConfig.uri,
-      data.mongoConfig.dbName,
-      data,
-      sections
-    );
+
+  const initialDb = buildTenantDefaults(tenant, ownerWithTenant);
+  initialDb.sessionAuditLogs = [
+    {
+      id: `audit-${Date.now()}`,
+      tenantId: tenant.id,
+      timestamp: now,
+      event: "TENANT_ONBOARDED",
+      userId: ownerWithTenant.id,
+      userName: ownerWithTenant.name,
+      userRole: ownerWithTenant.role,
+      details: `Provisioned StackLyra ERP workspace "${tenant.name}" (${tenant.slug}) on ${params.planId.toUpperCase()} plan.`,
+    },
+  ];
+
+  try {
+    await sql.begin(async (tx) => {
+      await lockTenant(tx, tenant.id);
+      if (
+        (await findTenantRow(tx, tenant.id)) ||
+        (await findTenantRow(tx, tenant.slug))
+      ) {
+        throw new Error(takenMessage);
+      }
+      await saveTenantDiff(tx, null, initialDb);
+    });
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === "23505") throw new Error(takenMessage);
+    throw err;
   }
+
+  return { tenant, db: initialDb };
 }

@@ -66,6 +66,18 @@ export const ERP_VERSION_POLICY = {
 
 export const ERP_RELEASES: ReleaseNoteItem[] = [
   {
+    version: "v0.7.0",
+    stage: ERP_RELEASE_STAGE,
+    summary:
+      "Multi-Tenant SaaS & Supabase PostgreSQL + Drizzle ORM milestone: organization onboarding, tenant-isolated JWT sessions, plan entitlements, and billing webhooks for erp.stacklyra.com.",
+    highlights: [
+      "Migrated data layer to multi-tenant Supabase PostgreSQL (Pooler :6543) + Drizzle ORM with per-tenant transaction scoping",
+      "Added self-serve SaaS workspace onboarding, Starter/Growth/Enterprise plan quotas, and signed billing webhooks",
+      "Enforced strict session-derived tenantId across all entities, document counters, fiscal periods, and API routes",
+      "Tenant-namespaced browser IndexedDB & localStorage crash-safe outbox plus configurable domain/CORS env support",
+    ],
+  },
+  {
     version: "v0.6.0",
     stage: ERP_RELEASE_STAGE,
     summary:

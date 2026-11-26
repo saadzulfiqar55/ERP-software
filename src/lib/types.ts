@@ -23,6 +23,65 @@ export type PRASyncStatus = "SYNCED" | "PENDING_OFFLINE" | "EXEMPT" | "FAILED";
 
 export type UserRole = "ADMIN" | "MANAGER" | "CASHIER";
 
+export type TenantMembershipRole = "OWNER" | "ADMIN" | "MANAGER" | "CASHIER";
+
+export type SubscriptionPlanId = "starter" | "growth" | "enterprise";
+
+export type TenantStatus = "TRIALING" | "ACTIVE" | "PAST_DUE" | "SUSPENDED";
+
+export type SaaSFeatureKey =
+  | "pos_terminal"
+  | "invoices"
+  | "inventory_catalog"
+  | "material_stock"
+  | "khata_ledger"
+  | "pra_fiscalization"
+  | "shift_reconciliation"
+  | "fiscal_period_locks"
+  | "audit_trail"
+  | "multi_branch";
+
+export interface PlanEntitlements {
+  planId: SubscriptionPlanId;
+  name: string;
+  tagline: string;
+  monthlyPricePkr: number;
+  monthlyPriceUsd: number;
+  maxSeats: number;
+  maxBranches: number;
+  maxProducts: number;
+  features: SaaSFeatureKey[];
+}
+
+export interface TenantSubscription {
+  planId: SubscriptionPlanId;
+  status: TenantStatus;
+  billingCycle: "MONTHLY" | "ANNUAL";
+  provider: "STRIPE" | "PADDLE" | "PAYFAST" | "MANUAL_IBFT" | "TRIAL";
+  externalSubscriptionId?: string;
+  trialEndsAt?: string;
+  currentPeriodEnd: string;
+  maxSeats: number;
+  maxBranches: number;
+  maxProducts: number;
+  features: SaaSFeatureKey[];
+}
+
+export interface TenantOrganization {
+  id: string;
+  slug: string;
+  name: string;
+  segment: "RESTAURANT" | "RETAIL" | "HYBRID";
+  invoicePrefix: string;
+  ownerUserId: string;
+  ownerEmail: string;
+  status: TenantStatus;
+  planId: SubscriptionPlanId;
+  subscription: TenantSubscription;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ERPPermission =
   | "pos:sale:create"
   | "pos:sale:void"
@@ -40,16 +99,26 @@ export type ERPPermission =
 
 export interface UserProfile {
   id: string;
-  tenantId?: string;
+  tenantId: string;
+  tenantSlug?: string;
   branchId?: string;
   allowedBranches?: string[];
   name: string;
   username?: string;
   role: UserRole;
+  membershipRole?: TenantMembershipRole;
+  isPlatformAdmin?: boolean;
   title: string;
   email: string;
+  /** @deprecated Legacy plaintext PIN. New PINs are stored only as `pinHash`; this is migrated and cleared on first use. */
   pin?: string;
+  /** scrypt hash of the staff PIN (`scrypt$<salt>$<hex>`). */
+  pinHash?: string;
   passwordHash?: string;
+  /** Consecutive failed sign-in attempts since the last success or lockout. */
+  failedLoginAttempts?: number;
+  /** ISO timestamp until which sign-in is refused for this profile. */
+  lockedUntil?: string;
   authType?: "PASSWORD" | "PIN";
   isDemoAccount?: boolean;
   passwordUpdatedInDb?: boolean;
@@ -67,11 +136,14 @@ export interface UserProfile {
 
 export interface ActiveSession {
   sessionId: string;
-  tenantId?: string;
+  tenantId: string;
+  tenantSlug?: string;
   branchId?: string;
   userId: string;
   userName: string;
   userRole: UserRole;
+  membershipRole?: TenantMembershipRole;
+  isPlatformAdmin?: boolean;
   userTitle: string;
   email: string;
   authMethod: "JWT_PIN" | "OAUTH_SSO";
@@ -83,13 +155,16 @@ export interface ActiveSession {
 
 export interface SessionAuditLog {
   id: string;
+  tenantId?: string;
   timestamp: string;
   event:
     | "LOGIN_SUCCESS"
     | "LOGOUT"
     | "SESSION_LOCKED_CONFLICT"
     | "ADMIN_FORCE_TAKEOVER"
-    | "TOKEN_REFRESH";
+    | "TOKEN_REFRESH"
+    | "TENANT_ONBOARDED"
+    | "LOGIN_LOCKOUT";
   userId: string;
   userName: string;
   userRole: UserRole;
@@ -104,7 +179,7 @@ export interface ImmutableAuditLog {
   actorId: string;
   actorName: string;
   actorRole: UserRole;
-  module: "POS" | "INVENTORY" | "ACCOUNTING" | "AUTH" | "SETTINGS";
+  module: "POS" | "INVENTORY" | "ACCOUNTING" | "AUTH" | "SETTINGS" | "SAAS";
   action: "CREATE" | "UPDATE" | "REVERSE_VOID" | "SOFT_ARCHIVE" | "PERIOD_LOCK";
   entityType: string;
   entityId: string;
@@ -112,6 +187,7 @@ export interface ImmutableAuditLog {
 }
 
 export interface IdempotencyRecord {
+  tenantId?: string;
   key: string;
   scope: string;
   createdAt: string;
@@ -120,7 +196,8 @@ export interface IdempotencyRecord {
 }
 
 export interface DocumentCounter {
-  key: string; // e.g. "TENANT_ALBARKA:INVOICE:2026"
+  tenantId?: string;
+  key: string; // e.g. "ten-stacklyra:INVOICE:2026"
   seq: number;
 }
 
@@ -142,6 +219,7 @@ export interface CashierShift {
 }
 
 export interface FiscalPeriod {
+  tenantId?: string;
   periodKey: string; // e.g. "2026-11"
   label: string;
   isLocked: boolean;
@@ -154,6 +232,7 @@ export interface MongoDBConfig {
   uri: string;
   dbName: string;
   lastStatus: string;
+  engine?: "POSTGRES_DRIZZLE" | "LOCAL_TENANT_STORE";
 }
 
 export interface ProductVariant {

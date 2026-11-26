@@ -1,3 +1,4 @@
+import { SAAS_PLANS } from "@/core/saas/entitlements";
 import { getPublicMongoConfig, DatabaseSchema } from "@/lib/db";
 import { UserProfile } from "@/lib/types";
 import { AccountingService } from "@/modules/accounting/accounting.service";
@@ -6,16 +7,29 @@ import { sanitizeUserForClient } from "./index";
 import { hasGranularPermission } from "./permissions";
 
 /**
- * Canonical RBAC-scoped response projection shared across `/api/state`, `/api/orders`,
- * and `/api/ledger`. Prevents leaking unauthenticated business records, `passwordHash`,
- * raw MongoDB URIs, PRA API tokens, or `idempotencyRecords`.
+ * Canonical Multi-Tenant & RBAC-scoped response projection shared across `/api/state`,
+ * `/api/orders`, and `/api/ledger`.
+ * - Strictly isolates tenant records.
+ * - Never leaks unauthenticated business records, `passwordHash`, raw DB URIs, or PRA API tokens.
  */
 export function buildScopedStateResponse(
   db: DatabaseSchema,
-  actor: UserProfile | null
+  actor: UserProfile | null,
+  options?: { allowUnauthenticatedStaffList?: boolean }
 ) {
   if (!actor) {
     return {
+      tenant: {
+        id: db.tenant.id,
+        slug: db.tenant.slug,
+        name: db.tenant.name,
+        segment: db.tenant.segment,
+        invoicePrefix: db.tenant.invoicePrefix,
+        status: db.tenant.status,
+        planId: db.tenant.planId,
+        subscription: db.tenant.subscription,
+      },
+      saasPlans: Object.values(SAAS_PLANS),
       praConfig: {
         restaurantName: db.praConfig.restaurantName,
         branchName: "",
@@ -34,6 +48,7 @@ export function buildScopedStateResponse(
         enabled: db.mongoConfig.enabled,
         uri: "",
         dbName: "",
+        engine: db.mongoConfig.engine,
         lastStatus: "Authentication required",
       },
       products: [],
@@ -41,9 +56,11 @@ export function buildScopedStateResponse(
       erpInvoices: [],
       parties: [],
       ledger: [],
-      users: db.users
-        .filter((u) => u.role !== "ADMIN")
-        .map((u) => sanitizeUserForClient(u, null)),
+      users: options?.allowUnauthenticatedStaffList
+        ? db.users
+            .filter((u) => u.role !== "ADMIN" && u.tenantId === db.tenant.id)
+            .map((u) => sanitizeUserForClient(u, null))
+        : [],
       activeSession: null,
       sessionAuditLogs: [],
       immutableAuditLogs: [],
@@ -79,24 +96,29 @@ export function buildScopedStateResponse(
           creditLimit: 0,
         }));
 
+  const tenantUsers = db.users.filter((u) => u.tenantId === db.tenant.id);
   const visibleUsers =
     actor.role === "ADMIN"
-      ? db.users
-      : db.users.filter((u) => u.role !== "ADMIN");
+      ? tenantUsers
+      : tenantUsers.filter((u) => u.role !== "ADMIN");
 
   return {
     ...db,
+    tenant: db.tenant,
+    saasPlans: Object.values(SAAS_PLANS),
     idempotencyRecords: [],
     praConfig: canManageSettings
       ? db.praConfig
       : { ...db.praConfig, apiToken: "" },
     users: visibleUsers.map((u) => sanitizeUserForClient(u, actor)),
-    mongoConfig: canManageSettings
+    // Even masked, the URI reveals the platform database host, so only the platform owner sees it.
+    mongoConfig: canManageSettings && actor.isPlatformAdmin
       ? getPublicMongoConfig(db.mongoConfig)
       : {
           enabled: db.mongoConfig.enabled,
           uri: "",
           dbName: db.mongoConfig.dbName,
+          engine: db.mongoConfig.engine,
           lastStatus: "Restricted to Owner / Super Admin",
         },
     products: InventoryService.listActiveProducts(db),

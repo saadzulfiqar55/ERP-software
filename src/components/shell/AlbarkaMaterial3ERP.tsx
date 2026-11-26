@@ -55,9 +55,12 @@ import {
   Product,
   ProductVariant,
   SessionAuditLog,
+  SubscriptionPlanId,
+  TenantOrganization,
   UserProfile,
   UserRole,
 } from "@/lib/types";
+import { SAAS_PLANS } from "@/core/saas/entitlements";
 import { calculateSalesTax } from "@/lib/tax-calculator";
 import {
   ERP_BRAND_CONFIG,
@@ -96,6 +99,7 @@ import { StackLyraLogo } from "@/components/ui/StackLyraLogo";
 import { ERP_VERSION_TAG } from "@/lib/version";
 import {
   clearDurableSnapshot,
+  getTenantScopedKey,
   POS_DRAFT_KEY,
   PosDraftSnapshot,
   QueuedMutation,
@@ -165,7 +169,9 @@ export function AlbarkaMaterial3ERP({
   defaultNav?: ERPNavKey;
   defaultInvoiceMode?: "LIST" | "NEW";
 }) {
-  // Authentication & Single-Session State (loaded strictly from /api/state)
+  // Authentication & Multi-Tenant SaaS Session State (loaded strictly from /api/state & /api/auth)
+  const [tenant, setTenant] = useState<TenantOrganization | null>(null);
+  const [platformTenants, setPlatformTenants] = useState<TenantOrganization[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
@@ -184,6 +190,7 @@ export function AlbarkaMaterial3ERP({
   const [snackbarMessage, setSnackbarMessage] = useState<string>("");
 
   const [settingsSubTab, setSettingsSubTab] = useState<
+    | "SAAS_SUBSCRIPTION"
     | "PRA_INTEGRATION"
     | "TAX_RULES"
     | "SESSION_JWT_MANAGER"
@@ -191,15 +198,15 @@ export function AlbarkaMaterial3ERP({
     | "RESTAURANT_PROFILES"
     | "ERP_AUDIT_COMPLIANCE"
     | "APPEARANCE"
-  >("PRA_INTEGRATION");
+  >("SAAS_SUBSCRIPTION");
 
   // Persistent App Data State (hydrated from DB via /api/state)
   const [praConfig, setPraConfig] = useState<PRAConfig>(EMPTY_PRA_CONFIG);
   const [mongoConfig, setMongoConfig] = useState<MongoDBConfig>({
     enabled: false,
     uri: "",
-    dbName: "albarka_erp",
-    lastStatus: "Loading MongoDB status…",
+    dbName: "postgres (Supabase Pooler :6543)",
+    lastStatus: "Loading Supabase PostgreSQL status…",
   });
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -336,24 +343,44 @@ export function AlbarkaMaterial3ERP({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  function saveWorkspaceCache(partial: Record<string, unknown>) {
-    const prev = readSyncJson<Record<string, unknown>>(WORKSPACE_CACHE_KEY) || {};
-    writeDurableSnapshot(WORKSPACE_CACHE_KEY, { ...prev, ...partial });
+  const activeTenantId = currentUser?.tenantId || tenant?.id || "ten-stacklyra";
+  const scopedWorkspaceCacheKey = getTenantScopedKey(
+    WORKSPACE_CACHE_KEY,
+    activeTenantId
+  );
+  const scopedPosDraftKey = getTenantScopedKey(POS_DRAFT_KEY, activeTenantId);
+
+  function saveWorkspaceCache(
+    partial: Record<string, unknown>,
+    explicitTenantId?: string
+  ) {
+    const key = getTenantScopedKey(
+      WORKSPACE_CACHE_KEY,
+      explicitTenantId || activeTenantId
+    );
+    const prev = readSyncJson<Record<string, unknown>>(key) || {};
+    writeDurableSnapshot(key, { ...prev, ...partial });
   }
 
-  function persistSyncQueue(next: QueuedMutation[]) {
+  function persistSyncQueue(next: QueuedMutation[], explicitTenantId?: string) {
     setSyncQueue(next);
-    writeDurableOutbox(next);
+    writeDurableOutbox(next, explicitTenantId || activeTenantId);
   }
 
-  // Continuously checkpoint active POS order to IndexedDB + localStorage so crashes/turnoffs never lose in-progress carts
+  // Continuously checkpoint active POS order to IndexedDB + localStorage scoped by tenantId
   useEffect(() => {
-    if (authChecking) return;
-    if (cart.length === 0 && !customerName && !customerPhone && discountAmount === 0) {
-      clearDurableSnapshot(POS_DRAFT_KEY);
+    if (authChecking || !currentUser) return;
+    if (
+      cart.length === 0 &&
+      !customerName &&
+      !customerPhone &&
+      discountAmount === 0
+    ) {
+      clearDurableSnapshot(scopedPosDraftKey);
       return;
     }
     const draft: PosDraftSnapshot = {
+      tenantId: activeTenantId,
       cart,
       orderType,
       tableNumber,
@@ -367,9 +394,12 @@ export function AlbarkaMaterial3ERP({
       cashTendered,
       updatedAt: new Date().toISOString(),
     };
-    writeDurableSnapshot(POS_DRAFT_KEY, draft);
+    writeDurableSnapshot(scopedPosDraftKey, draft);
   }, [
     authChecking,
+    currentUser,
+    activeTenantId,
+    scopedPosDraftKey,
     cart,
     orderType,
     tableNumber,
@@ -463,6 +493,7 @@ export function AlbarkaMaterial3ERP({
     const stateRes = await fetch("/api/state");
     if (!stateRes.ok) return;
     const data = await stateRes.json();
+    if (data.tenant) setTenant(data.tenant);
     if (data.praConfig) setPraConfig(data.praConfig);
     if (data.mongoConfig) setMongoConfig(data.mongoConfig);
     setProducts(data.products || []);
@@ -491,43 +522,96 @@ export function AlbarkaMaterial3ERP({
     if (data.cashierShifts) setCashierShifts(data.cashierShifts);
     if (data.fiscalPeriods) setFiscalPeriods(data.fiscalPeriods);
 
-    saveWorkspaceCache({
-      praConfig: data.praConfig,
-      products: data.products || [],
-      orders: data.orders || [],
-      erpInvoices: data.erpInvoices || [],
-      waitingTasks: data.waitingTasks || [],
-      stockMonitor: data.stockMonitor || [],
-      restaurantTables: nextTables,
-      servers: nextServers,
-    });
+    const tid = data.tenant?.id || activeTenantId;
+    saveWorkspaceCache(
+      {
+        tenant: data.tenant,
+        praConfig: data.praConfig,
+        products: data.products || [],
+        orders: data.orders || [],
+        erpInvoices: data.erpInvoices || [],
+        waitingTasks: data.waitingTasks || [],
+        stockMonitor: data.stockMonitor || [],
+        restaurantTables: nextTables,
+        servers: nextServers,
+      },
+      tid
+    );
   }
 
-  // Hydrate instant local cache, restore crash-recovered POS drafts & outbox, monitor connectivity, and verify JWT session on mount
-  useEffect(() => {
-    let restoredCartCount = 0;
+  async function fetchPlatformTenantsIfOwner() {
     try {
-      const c = readSyncJson<Record<string, unknown>>(WORKSPACE_CACHE_KEY);
+      const res = await fetch("/api/saas/onboarding");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.tenants)) {
+        setPlatformTenants(data.tenants);
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  async function handleUpdateSubscriptionPlan(
+    planId: SubscriptionPlanId,
+    targetTenantId?: string,
+    status?: "TRIALING" | "ACTIVE" | "PAST_DUE" | "SUSPENDED"
+  ) {
+    try {
+      const res = await fetch("/api/saas/onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "UPDATE_SUBSCRIPTION",
+          planId,
+          targetTenantId,
+          status,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        notifySaved(data.error || "Could not update subscription plan.");
+        return;
+      }
+      if (data.tenant && (!targetTenantId || targetTenantId === tenant?.id)) {
+        setTenant(data.tenant);
+      }
+      if (Array.isArray(data.tenants)) {
+        setPlatformTenants(data.tenants);
+      }
+      notifySaved(
+        `Updated SaaS plan to ${SAAS_PLANS[planId]?.name || planId} (${
+          status || "ACTIVE"
+        }).`
+      );
+      void fetchScopedState();
+    } catch {
+      notifySaved("Network error while updating SaaS plan.");
+    }
+  }
+
+  async function hydrateTenantLocalCrashStore(tid: string) {
+    const tCacheKey = getTenantScopedKey(WORKSPACE_CACHE_KEY, tid);
+    const tDraftKey = getTenantScopedKey(POS_DRAFT_KEY, tid);
+    let restoredCartCount = 0;
+
+    try {
+      const c = readSyncJson<Record<string, unknown>>(tCacheKey);
       if (c) {
         if (c.praConfig) setPraConfig(c.praConfig as PRAConfig);
         if (Array.isArray(c.products)) setProducts(c.products as Product[]);
         if (Array.isArray(c.orders)) setOrders(c.orders as Order[]);
-        if (Array.isArray(c.erpInvoices)) setErpInvoices(c.erpInvoices as ERPInvoice[]);
-        if (Array.isArray(c.waitingTasks)) setWaitingTasks(c.waitingTasks as WaitingTaskItem[]);
-        if (Array.isArray(c.stockMonitor)) setStockMonitor(c.stockMonitor as StockLevelMonitorItem[]);
-        if (Array.isArray(c.restaurantTables)) {
-          const cachedTables = c.restaurantTables as string[];
-          setRestaurantTables(cachedTables);
-          setTableNumber((prev) => prev || cachedTables[0] || "");
-        }
-        if (Array.isArray(c.servers)) {
-          const cachedServers = c.servers as string[];
-          setServers(cachedServers);
-          setWaiterName((prev) => prev || cachedServers[0] || "");
-        }
+        if (Array.isArray(c.erpInvoices))
+          setErpInvoices(c.erpInvoices as ERPInvoice[]);
+        if (Array.isArray(c.waitingTasks))
+          setWaitingTasks(c.waitingTasks as WaitingTaskItem[]);
+        if (Array.isArray(c.stockMonitor))
+          setStockMonitor(c.stockMonitor as StockLevelMonitorItem[]);
       }
 
-      const draft = readSyncJson<PosDraftSnapshot>(POS_DRAFT_KEY);
+      const draft =
+        readSyncJson<PosDraftSnapshot>(tDraftKey) ||
+        (await readDurableSnapshotAsync<PosDraftSnapshot>(tDraftKey));
       if (draft && Array.isArray(draft.cart) && draft.cart.length > 0) {
         setCart(draft.cart);
         if (draft.orderType) setOrderType(draft.orderType);
@@ -536,11 +620,15 @@ export function AlbarkaMaterial3ERP({
         if (draft.customerName) setCustomerName(draft.customerName);
         if (draft.customerPhone) setCustomerPhone(draft.customerPhone);
         if (draft.selectedKhataId) setSelectedKhataId(draft.selectedKhataId);
-        if (typeof draft.discountAmount === "number") setDiscountAmount(draft.discountAmount);
+        if (typeof draft.discountAmount === "number")
+          setDiscountAmount(draft.discountAmount);
         if (draft.paymentMethod) setPaymentMethod(draft.paymentMethod);
-        if (typeof draft.splitCashRatio === "number") setSplitCashRatio(draft.splitCashRatio);
+        if (typeof draft.splitCashRatio === "number")
+          setSplitCashRatio(draft.splitCashRatio);
         if (draft.cashTendered) setCashTendered(draft.cashTendered);
         restoredCartCount = draft.cart.length;
+      } else {
+        setCart([]);
       }
     } catch {
       // Ignore corrupt cache
@@ -548,31 +636,24 @@ export function AlbarkaMaterial3ERP({
 
     if (restoredCartCount > 0) {
       notifySaved(
-        `Recovered unfinished POS order (${restoredCartCount} item${restoredCartCount > 1 ? "s" : ""}) from previous session.`
+        `Recovered unfinished POS order (${restoredCartCount} item${
+          restoredCartCount > 1 ? "s" : ""
+        }) from previous session.`
       );
     }
 
-    // Reconcile IndexedDB durable store (fallback when localStorage was pruned)
-    void (async () => {
-      const durableOutbox = await readDurableOutboxAsync();
-      if (durableOutbox.length > 0) {
-        setSyncQueue(durableOutbox);
-        if (typeof navigator === "undefined" || navigator.onLine) {
-          void flushSyncQueue(durableOutbox);
-        }
-      }
-      if (restoredCartCount === 0) {
-        const idbDraft = await readDurableSnapshotAsync<PosDraftSnapshot>(POS_DRAFT_KEY);
-        if (idbDraft && Array.isArray(idbDraft.cart) && idbDraft.cart.length > 0) {
-          setCart(idbDraft.cart);
-          if (idbDraft.orderType) setOrderType(idbDraft.orderType);
-          if (idbDraft.tableNumber) setTableNumber(idbDraft.tableNumber);
-          if (idbDraft.waiterName) setWaiterName(idbDraft.waiterName);
-          notifySaved(`Recovered unfinished POS order (${idbDraft.cart.length} items).`);
-        }
-      }
-    })();
+    const durableOutbox = await readDurableOutboxAsync(tid);
+    setSyncQueue(durableOutbox);
+    if (
+      durableOutbox.length > 0 &&
+      (typeof navigator === "undefined" || navigator.onLine)
+    ) {
+      void flushSyncQueue(durableOutbox);
+    }
+  }
 
+  // Hydrate instant local cache, restore crash-recovered POS drafts & outbox, monitor connectivity, and verify JWT session on mount
+  useEffect(() => {
     if (typeof navigator !== "undefined") {
       setIsOnline(navigator.onLine);
     }
@@ -594,8 +675,17 @@ export function AlbarkaMaterial3ERP({
           const authData = await authRes.json();
           setActiveSession(authData.activeSession || null);
           setSessionAuditLogs(authData.sessionAuditLogs || []);
+          if (authData.tenant) {
+            setTenant(authData.tenant);
+          }
           if (authData.authenticated && authData.user) {
             setCurrentUser(authData.user);
+            const tid =
+              authData.tenant?.id || authData.user.tenantId || "ten-stacklyra";
+            await hydrateTenantLocalCrashStore(tid);
+            if (authData.user.isPlatformAdmin || tid === "ten-stacklyra") {
+              void fetchPlatformTenantsIfOwner();
+            }
           }
         }
       } catch {
@@ -996,7 +1086,7 @@ export function AlbarkaMaterial3ERP({
       setCart([]);
       setDiscountAmount(0);
       setCashTendered("");
-      clearDurableSnapshot(POS_DRAFT_KEY);
+      clearDurableSnapshot(scopedPosDraftKey);
       notifySaved("Sale saved locally — queued in outbox for cloud & PRA sync.");
     };
 
@@ -1025,7 +1115,7 @@ export function AlbarkaMaterial3ERP({
         setCart([]);
         setDiscountAmount(0);
         setCashTendered("");
-        clearDurableSnapshot(POS_DRAFT_KEY);
+        clearDurableSnapshot(scopedPosDraftKey);
       } else {
         // Explicit server/domain rejection (stock, locked fiscal period, auth): remove stale outbox entry
         persistSyncQueue(syncQueue.filter((q) => q.id !== outboxId));
@@ -1781,7 +1871,7 @@ export function AlbarkaMaterial3ERP({
       [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
     const link = document.createElement("a");
     link.setAttribute("href", encodeURI(csvContent));
-    link.setAttribute("download", `Albarka_PRA_Sales_Tax_Register.csv`);
+    link.setAttribute("download", `StackLyra_PRA_Sales_Tax_Register.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1796,14 +1886,27 @@ export function AlbarkaMaterial3ERP({
       <AuthScreen
         users={users}
         activeSession={activeSession}
-        onAuthSuccess={({ user, activeSession: ses, sessionAuditLogs: logs }) => {
+        onAuthSuccess={({
+          user,
+          tenant: authTenant,
+          activeSession: ses,
+          sessionAuditLogs: logs,
+        }) => {
           setCurrentUser(user);
+          if (authTenant) setTenant(authTenant);
           setActiveSession(ses);
           setSessionAuditLogs(logs);
           if (!hasGranularPermission(user.role, "settings:pra:manage")) {
             setSettingsSubTab("APPEARANCE");
+          } else {
+            setSettingsSubTab("SAAS_SUBSCRIPTION");
           }
+          const tid = authTenant?.id || user.tenantId || "ten-stacklyra";
+          void hydrateTenantLocalCrashStore(tid);
           void fetchScopedState();
+          if (user.isPlatformAdmin || tid === "ten-stacklyra") {
+            void fetchPlatformTenantsIfOwner();
+          }
         }}
       />
     );
@@ -2210,7 +2313,8 @@ export function AlbarkaMaterial3ERP({
                 {ERP_BRAND_CONFIG.productName}
               </div>
               <div className="text-xs text-md-on-surface-variant truncate">
-                {ERP_BRAND_CONFIG.workspaceSubtitle} · {ERP_VERSION_TAG}
+                {tenant?.name || ERP_BRAND_CONFIG.workspaceSubtitle} ·{" "}
+                {ERP_VERSION_TAG}
               </div>
             </div>
           </div>
@@ -4123,37 +4227,331 @@ export function AlbarkaMaterial3ERP({
           )}
 
           {/* =============================================================== */}
-          {/* SETTINGS, PRA e-IMS, JWT, MONGODB & IMMUTABLE AUDIT LOG         */}
+          {/* SETTINGS, SAAS BILLING, PRA e-IMS, JWT, POSTGRES & AUDIT LOG    */}
           {/* =============================================================== */}
           {activeNav === "settings" && (
             <div className="space-y-6 max-w-5xl">
               <PageHeader
-                title="Settings & PRA configuration"
-                subtitle="Configure Punjab Revenue Authority e-IMS, tax rules, JWT security, MongoDB, and audit logs"
+                title="Settings, SaaS billing & PRA configuration"
+                subtitle="Manage your organization subscription plan, Supabase PostgreSQL connection, Punjab Revenue Authority e-IMS, and audit logs"
               />
 
               <div className="flex flex-wrap gap-2">
                 {(
                   [
-                    { id: "PRA_INTEGRATION", label: "PRA e-IMS", visible: canManagePra },
-                    { id: "TAX_RULES", label: "Tax rules", visible: canManagePra },
-                    { id: "MONGODB_DATABASE", label: "MongoDB", visible: canManagePra },
-                    { id: "RESTAURANT_PROFILES", label: "Staff roles & profiles", visible: canManageUsers },
-                    { id: "ERP_AUDIT_COMPLIANCE", label: "Audit trail", visible: canViewLedger },
-                    { id: "SESSION_JWT_MANAGER", label: "JWT session", visible: true },
-                    { id: "APPEARANCE", label: "Appearance", visible: true },
+                    {
+                      id: "SAAS_SUBSCRIPTION",
+                      label: "SaaS Plan & Billing",
+                      visible: true,
+                    },
+                    {
+                      id: "PRA_INTEGRATION",
+                      label: "PRA e-IMS",
+                      visible: canManagePra,
+                    },
+                    {
+                      id: "TAX_RULES",
+                      label: "Tax rules",
+                      visible: canManagePra,
+                    },
+                    {
+                      id: "MONGODB_DATABASE",
+                      label: "PostgreSQL & Drizzle",
+                      visible: canManagePra,
+                    },
+                    {
+                      id: "RESTAURANT_PROFILES",
+                      label: "Staff roles & profiles",
+                      visible: canManageUsers,
+                    },
+                    {
+                      id: "ERP_AUDIT_COMPLIANCE",
+                      label: "Audit trail",
+                      visible: canViewLedger,
+                    },
+                    {
+                      id: "SESSION_JWT_MANAGER",
+                      label: "JWT session",
+                      visible: true,
+                    },
+                    {
+                      id: "APPEARANCE",
+                      label: "Appearance",
+                      visible: true,
+                    },
                   ] as const
                 )
                   .filter((tab) => tab.visible)
                   .map((tab) => (
-                  <FilterChip
-                    key={tab.id}
-                    label={tab.label}
-                    selected={settingsSubTab === tab.id}
-                    onClick={() => setSettingsSubTab(tab.id)}
-                  />
-                ))}
+                    <FilterChip
+                      key={tab.id}
+                      label={tab.label}
+                      selected={settingsSubTab === tab.id}
+                      onClick={() => setSettingsSubTab(tab.id)}
+                    />
+                  ))}
               </div>
+
+              {settingsSubTab === "SAAS_SUBSCRIPTION" && (
+                <div className="space-y-6">
+                  <Card className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <h2 className="text-base font-semibold text-md-on-surface">
+                            {tenant?.name || "StackLyra Workspace"}
+                          </h2>
+                          <StatusChip
+                            label={`Plan: ${(
+                              tenant?.planId || "enterprise"
+                            ).toUpperCase()}`}
+                            variant="primary"
+                          />
+                          <StatusChip
+                            label={tenant?.status || "ACTIVE"}
+                            variant={
+                              tenant?.status === "SUSPENDED"
+                                ? "error"
+                                : tenant?.status === "PAST_DUE"
+                                ? "warning"
+                                : "success"
+                            }
+                          />
+                        </div>
+                        <p className="text-xs text-md-on-surface-variant font-mono mt-1">
+                          Workspace Slug: {tenant?.slug || "stacklyra"} · Tenant
+                          ID: {tenant?.id || "ten-stacklyra"} · Invoice Prefix:{" "}
+                          {tenant?.invoicePrefix || "SL"}
+                        </p>
+                      </div>
+                      <div className="text-right text-xs text-md-on-surface-variant">
+                        <div>Primary Domain: erp.stacklyra.com</div>
+                        <div>Marketing &amp; Checkout: stacklyra.com</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="p-4 rounded-2xl bg-md-surface-container-low space-y-1.5">
+                        <div className="text-xs text-md-on-surface-variant">
+                          Staff seat quota
+                        </div>
+                        <div className="text-base font-mono font-semibold text-md-on-surface">
+                          {users.length} /{" "}
+                          {(tenant?.subscription?.maxSeats || 9999) > 500
+                            ? "Unlimited"
+                            : tenant?.subscription?.maxSeats}
+                        </div>
+                        <ProgressBar
+                          value={users.length}
+                          max={Math.min(
+                            tenant?.subscription?.maxSeats || 15,
+                            100
+                          )}
+                        />
+                      </div>
+
+                      <div className="p-4 rounded-2xl bg-md-surface-container-low space-y-1.5">
+                        <div className="text-xs text-md-on-surface-variant">
+                          Catalog items quota
+                        </div>
+                        <div className="text-base font-mono font-semibold text-md-on-surface">
+                          {products.length} /{" "}
+                          {(tenant?.subscription?.maxProducts || 99999) > 5000
+                            ? "Unlimited"
+                            : tenant?.subscription?.maxProducts}
+                        </div>
+                        <ProgressBar
+                          value={products.length}
+                          max={Math.min(
+                            tenant?.subscription?.maxProducts || 150,
+                            500
+                          )}
+                        />
+                      </div>
+
+                      <div className="p-4 rounded-2xl bg-md-surface-container-low space-y-1.5">
+                        <div className="text-xs text-md-on-surface-variant">
+                          Current billing period end
+                        </div>
+                        <div className="text-sm font-mono font-medium text-md-on-surface">
+                          {tenant?.subscription?.currentPeriodEnd
+                            ? new Date(
+                                tenant.subscription.currentPeriodEnd
+                              ).toLocaleDateString()
+                            : "Active Annual"}
+                        </div>
+                        <div className="text-[11px] text-md-on-surface-variant">
+                          Webhook endpoint: /api/saas/webhooks/billing
+                        </div>
+                      </div>
+                    </div>
+
+                    {isSuperAdmin && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                        {Object.values(SAAS_PLANS).map((plan) => {
+                          const isCurrent = tenant?.planId === plan.planId;
+                          return (
+                            <div
+                              key={plan.planId}
+                              className={`p-4 rounded-2xl flex flex-col justify-between gap-3 ${
+                                isCurrent
+                                  ? "bg-md-primary-container/45 ring-2 ring-md-primary"
+                                  : "bg-md-surface-container-low"
+                              }`}
+                            >
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-semibold text-sm text-md-on-surface">
+                                    {plan.name}
+                                  </span>
+                                  <span className="font-mono text-xs text-md-primary font-semibold">
+                                    PKR {plan.monthlyPricePkr.toLocaleString()}/mo
+                                  </span>
+                                </div>
+                                <p className="text-xs text-md-on-surface-variant">
+                                  {plan.tagline}
+                                </p>
+                                <div className="text-[11px] font-mono text-md-on-surface-variant pt-1">
+                                  Seats:{" "}
+                                  {plan.maxSeats > 500
+                                    ? "Unlimited"
+                                    : plan.maxSeats}{" "}
+                                  · Items:{" "}
+                                  {plan.maxProducts > 5000
+                                    ? "Unlimited"
+                                    : plan.maxProducts}
+                                </div>
+                              </div>
+                              <Button
+                                variant={isCurrent ? "tonal" : "filled"}
+                                size="sm"
+                                disabled={isCurrent}
+                                onClick={() =>
+                                  void handleUpdateSubscriptionPlan(plan.planId)
+                                }
+                              >
+                                {isCurrent
+                                  ? "Current Active Plan"
+                                  : `Switch to ${plan.name}`}
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </Card>
+
+                  {(currentUser.isPlatformAdmin ||
+                    tenant?.id === "ten-stacklyra") &&
+                    platformTenants.length > 0 && (
+                      <Card className="p-0! overflow-hidden">
+                        <div className="p-4 border-b border-md-divider flex items-center justify-between">
+                          <div>
+                            <h3 className="text-base font-semibold text-md-on-surface">
+                              StackLyra Platform Super-Admin Control Plane (
+                              {platformTenants.length} organizations)
+                            </h3>
+                            <p className="text-xs text-md-on-surface-variant">
+                              Manage all SaaS tenants, upgrade plans, or toggle
+                              read-only suspension across erp.stacklyra.com
+                            </p>
+                          </div>
+                          <StatusChip
+                            label="Platform Owner (Saad)"
+                            variant="primary"
+                          />
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-sm">
+                            <thead>
+                              <tr className="border-b border-md-divider bg-md-surface-container-low/60 text-xs font-medium text-md-on-surface-variant">
+                                <th className="py-3 px-4">Organization</th>
+                                <th className="py-3 px-3">Slug / Prefix</th>
+                                <th className="py-3 px-3">Owner</th>
+                                <th className="py-3 px-3">Plan</th>
+                                <th className="py-3 px-3">Status</th>
+                                <th className="py-3 px-4 text-right">
+                                  Platform Actions
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-md-divider">
+                              {platformTenants.map((pt) => (
+                                <tr key={pt.id}>
+                                  <td className="py-3 px-4 font-medium text-md-on-surface">
+                                    {pt.name}
+                                  </td>
+                                  <td className="py-3 px-3 font-mono text-xs text-md-primary">
+                                    {pt.slug} ({pt.invoicePrefix})
+                                  </td>
+                                  <td className="py-3 px-3 text-xs text-md-on-surface-variant">
+                                    {pt.ownerEmail}
+                                  </td>
+                                  <td className="py-3 px-3">
+                                    <StatusChip
+                                      label={pt.planId.toUpperCase()}
+                                      variant="primary"
+                                    />
+                                  </td>
+                                  <td className="py-3 px-3">
+                                    <StatusChip
+                                      label={pt.status}
+                                      variant={
+                                        pt.status === "SUSPENDED"
+                                          ? "error"
+                                          : "success"
+                                      }
+                                    />
+                                  </td>
+                                  <td className="py-3 px-4 text-right">
+                                    <div className="inline-flex items-center gap-1.5">
+                                      <Button
+                                        variant="tonal"
+                                        size="sm"
+                                        onClick={() =>
+                                          void handleUpdateSubscriptionPlan(
+                                            pt.planId === "starter"
+                                              ? "growth"
+                                              : pt.planId === "growth"
+                                              ? "enterprise"
+                                              : "starter",
+                                            pt.id,
+                                            "ACTIVE"
+                                          )
+                                        }
+                                      >
+                                        Cycle Plan
+                                      </Button>
+                                      {pt.id !== "ten-stacklyra" && (
+                                        <Button
+                                          variant="outlined"
+                                          size="sm"
+                                          onClick={() =>
+                                            void handleUpdateSubscriptionPlan(
+                                              pt.planId,
+                                              pt.id,
+                                              pt.status === "SUSPENDED"
+                                                ? "ACTIVE"
+                                                : "SUSPENDED"
+                                            )
+                                          }
+                                        >
+                                          {pt.status === "SUSPENDED"
+                                            ? "Activate"
+                                            : "Suspend"}
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </Card>
+                    )}
+                </div>
+              )}
 
               {settingsSubTab === "PRA_INTEGRATION" && canManagePra && (
                 <Card className="space-y-5">
@@ -4278,42 +4676,41 @@ export function AlbarkaMaterial3ERP({
                 <Card className="space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-base font-semibold text-md-on-surface">
-                      MongoDB connection configuration
+                      Supabase PostgreSQL &amp; Drizzle ORM configuration
                     </h2>
                     <StatusChip
-                      label={`Isolated DB: ${mongoConfig.dbName || "albarka_erp"}`}
+                      label={
+                        mongoConfig.dbName ||
+                        "postgres (Supabase Transaction Pooler :6543)"
+                      }
                       variant={mongoConfig.enabled ? "success" : "primary"}
                     />
                   </div>
                   <div className="p-3.5 rounded-xl bg-md-surface-container-low text-xs text-md-on-surface-variant space-y-1">
                     <div>{mongoConfig.lastStatus}</div>
                     <div className="text-[11px] opacity-80">
-                      Protected databases (such as <code className="font-mono">votix</code>) are blocked so StackLyra ERP data stays in its own separate database (<code className="font-mono">albarka_erp</code>).
+                      Multi-tenant isolation is enforced via composite{" "}
+                      <code className="font-mono">(tenant_id, id)</code> keys
+                      and transaction-scoped{" "}
+                      <code className="font-mono">
+                        SET LOCAL app.current_tenant
+                      </code>{" "}
+                      in Supabase PostgreSQL.
                     </div>
                   </div>
                   <form onSubmit={handleSaveMongoConfig} className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="sm:col-span-2">
-                        <OutlinedTextField
-                          label="MongoDB URI"
-                          mono
-                          value={mongoConfig.uri}
-                          onChange={(v) =>
-                            setMongoConfig({ ...mongoConfig, uri: v })
-                          }
-                        />
-                      </div>
+                    <div className="grid grid-cols-1 gap-4">
                       <OutlinedTextField
-                        label="Database name"
+                        label="Supabase PostgreSQL Connection URI (DATABASE_URL)"
                         mono
-                        value={mongoConfig.dbName}
+                        value={mongoConfig.uri}
                         onChange={(v) =>
-                          setMongoConfig({ ...mongoConfig, dbName: v })
+                          setMongoConfig({ ...mongoConfig, uri: v })
                         }
                       />
                     </div>
                     <Button type="submit" variant="filled">
-                      Test & save MongoDB connection
+                      Test &amp; save Supabase PostgreSQL connection
                     </Button>
                   </form>
                 </Card>

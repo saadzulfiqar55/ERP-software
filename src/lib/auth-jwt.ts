@@ -1,36 +1,51 @@
 import crypto from "crypto";
-import { UserRole } from "./types";
+import { TenantMembershipRole, UserRole } from "./types";
 
 declare global {
   // eslint-disable-next-line no-var
   var __stacklyraEphemeralJwtSecret: string | undefined;
 }
 
+const KNOWN_PUBLIC_SECRETS = new Set([
+  "stacklyra_erp_super_secret_hmac_sha256_key_2026",
+]);
+
 function getJwtSecret(): string {
   const configured = process.env.JWT_SECRET?.trim();
-  if (configured) return configured;
 
   if (process.env.NODE_ENV === "production") {
-    if (!globalThis.__stacklyraEphemeralJwtSecret) {
-      globalThis.__stacklyraEphemeralJwtSecret = crypto
-        .randomBytes(32)
-        .toString("hex");
-      console.warn(
-        "[Security] JWT_SECRET is not set in production; generated an ephemeral per-process HMAC key."
+    // Fail closed: a missing, short, or previously published secret would let anyone mint sessions,
+    // and a per-process random key silently breaks sessions across server instances.
+    if (!configured || configured.length < 32 || KNOWN_PUBLIC_SECRETS.has(configured)) {
+      throw new Error(
+        "Server misconfigured: JWT_SECRET must be set to a private random value of at least 32 characters."
       );
     }
-    return globalThis.__stacklyraEphemeralJwtSecret;
+    return configured;
   }
 
-  return "albarka_pos_super_secret_hmac_sha256_key_2026";
+  if (configured) return configured;
+
+  // Development only: random per-process key (restarting the dev server signs you out).
+  if (!globalThis.__stacklyraEphemeralJwtSecret) {
+    globalThis.__stacklyraEphemeralJwtSecret = crypto
+      .randomBytes(32)
+      .toString("hex");
+  }
+  return globalThis.__stacklyraEphemeralJwtSecret;
 }
 
 export interface JWTPayload {
   sub: string; // userId
+  tid: string; // tenantId (strictly enforced across all queries)
+  tslug?: string; // tenantSlug
+  bid?: string; // branchId
   name: string;
   role: UserRole;
+  membershipRole?: TenantMembershipRole;
+  isPlatformAdmin?: boolean;
   email: string;
-  sid: string; // unique sessionId for single-active-session lock
+  sid: string; // unique sessionId
   authMethod: "JWT_PIN" | "OAUTH_SSO";
   iat: number;
   exp: number;
@@ -53,11 +68,11 @@ function base64UrlDecode(input: string): string {
 }
 
 /**
- * Signs a standard RFC 7519 HS256 JWT token
+ * Signs a standard RFC 7519 HS256 JWT token carrying tenant & role claims
  */
 export function signJwt(
   payload: Omit<JWTPayload, "iat" | "exp">,
-  expiresInSeconds: number = 8 * 60 * 60 // 8-hour POS shift default
+  expiresInSeconds: number = 8 * 60 * 60
 ): { token: string; fullPayload: JWTPayload } {
   const header = { alg: "HS256", typ: "JWT" };
   const now = Math.floor(Date.now() / 1000);
@@ -119,7 +134,10 @@ export function verifyJwt(token: string): JWTPayload | null {
       return null;
     }
 
-    return payload;
+    return {
+      ...payload,
+      tid: payload.tid || "ten-stacklyra",
+    };
   } catch {
     return null;
   }

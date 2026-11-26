@@ -1,10 +1,10 @@
 /**
- * Browser Crash-Safe Durability & Write-Ahead Outbox Store (`v0.6.0`)
+ * Multi-Tenant Browser Crash-Safe Durability & Write-Ahead Outbox Store (`v0.7.0`)
  *
  * Dual-writes critical client state (active POS draft, invoice draft, workspace cache,
  * and pending outbox mutations) to IndexedDB (`stacklyra_crash_safe_db`) alongside a
- * synchronous `localStorage` mirror so hard power-offs, browser crashes, or dropped Wi-Fi
- * never lose in-progress carts or unconfirmed transactions.
+ * synchronous `localStorage` mirror, strictly namespaced by `tenantId` so switching
+ * SaaS workspaces on a shared terminal never mixes cached data or queued mutations.
  */
 
 import type { CartItem, OrderType, PaymentMethod } from "./types";
@@ -14,8 +14,17 @@ export const SYNC_QUEUE_KEY = "stacklyra_sync_queue_v1";
 export const POS_DRAFT_KEY = "stacklyra_pos_draft_v1";
 export const INVOICE_DRAFT_KEY = "stacklyra_invoice_draft_v1";
 
+export function getTenantScopedKey(baseKey: string, tenantId?: string | null): string {
+  const cleanTenant = (tenantId || "ten-stacklyra")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "_");
+  return `${baseKey}::${cleanTenant}`;
+}
+
 export interface QueuedMutation {
   id: string;
+  tenantId?: string;
   url: string;
   method: "POST" | "PUT";
   payload: Record<string, unknown>;
@@ -24,6 +33,7 @@ export interface QueuedMutation {
 }
 
 export interface PosDraftSnapshot {
+  tenantId?: string;
   cart: CartItem[];
   orderType: OrderType;
   tableNumber: string;
@@ -111,54 +121,25 @@ async function idbGetKv<T>(key: string): Promise<T | null> {
   });
 }
 
-async function idbSyncOutbox(items: QueuedMutation[]): Promise<void> {
+async function idbSyncOutbox(
+  items: QueuedMutation[],
+  tenantId?: string | null
+): Promise<void> {
   const db = await openCrashSafeIdb();
   if (!db) return;
-  await new Promise<void>((resolve) => {
-    try {
-      const tx = db.transaction(STORE_OUTBOX, "readwrite");
-      const store = tx.objectStore(STORE_OUTBOX);
-      store.clear();
-      for (const item of items) {
-        store.put(item);
-      }
-      tx.oncomplete = () => {
-        db.close();
-        resolve();
-      };
-      tx.onerror = () => {
-        db.close();
-        resolve();
-      };
-    } catch {
-      db.close();
-      resolve();
-    }
-  });
+  const scopedKey = getTenantScopedKey(SYNC_QUEUE_KEY, tenantId);
+  await idbPutKv(scopedKey, items);
 }
 
-async function idbListOutbox(): Promise<QueuedMutation[]> {
-  const db = await openCrashSafeIdb();
-  if (!db) return [];
-  return new Promise<QueuedMutation[]>((resolve) => {
-    try {
-      const tx = db.transaction(STORE_OUTBOX, "readonly");
-      const req = tx.objectStore(STORE_OUTBOX).getAll();
-      req.onsuccess = () => {
-        db.close();
-        const rows = (req.result as QueuedMutation[]) || [];
-        rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-        resolve(rows);
-      };
-      req.onerror = () => {
-        db.close();
-        resolve([]);
-      };
-    } catch {
-      db.close();
-      resolve([]);
-    }
-  });
+async function idbListOutbox(
+  tenantId?: string | null
+): Promise<QueuedMutation[]> {
+  const scopedKey = getTenantScopedKey(SYNC_QUEUE_KEY, tenantId);
+  const rows = await idbGetKv<QueuedMutation[]>(scopedKey);
+  if (Array.isArray(rows)) {
+    return [...rows].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+  return [];
 }
 
 export function readSyncJson<T>(key: string): T | null {
@@ -194,18 +175,25 @@ export async function readDurableSnapshotAsync<T>(key: string): Promise<T | null
   return readSyncJson<T>(key);
 }
 
-export function writeDurableOutbox(items: QueuedMutation[]): void {
+export function writeDurableOutbox(
+  items: QueuedMutation[],
+  tenantId?: string | null
+): void {
+  const scopedKey = getTenantScopedKey(SYNC_QUEUE_KEY, tenantId);
   try {
-    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(items));
+    localStorage.setItem(scopedKey, JSON.stringify(items));
   } catch {
     // Fallback to IndexedDB
   }
-  void idbSyncOutbox(items);
+  void idbSyncOutbox(items, tenantId);
 }
 
-export async function readDurableOutboxAsync(): Promise<QueuedMutation[]> {
-  const idbItems = await idbListOutbox();
+export async function readDurableOutboxAsync(
+  tenantId?: string | null
+): Promise<QueuedMutation[]> {
+  const idbItems = await idbListOutbox(tenantId);
   if (idbItems.length > 0) return idbItems;
-  const lsItems = readSyncJson<QueuedMutation[]>(SYNC_QUEUE_KEY);
+  const scopedKey = getTenantScopedKey(SYNC_QUEUE_KEY, tenantId);
+  const lsItems = readSyncJson<QueuedMutation[]>(scopedKey);
   return Array.isArray(lsItems) ? lsItems : [];
 }
