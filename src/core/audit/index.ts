@@ -42,7 +42,9 @@ export function appendAuditLog(
     summary: params.summary,
   };
 
+  // Append-only: in a transaction this list holds only the new entries, which are inserted
+  // into stacklyra_immutable_audit_logs. Nothing is ever trimmed or deleted.
   const currentLogs = db.immutableAuditLogs || [];
-  db.immutableAuditLogs = [entry, ...currentLogs.slice(0, 299)];
+  db.immutableAuditLogs = [entry, ...currentLogs];
   return entry;
 }

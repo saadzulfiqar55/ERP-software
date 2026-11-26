@@ -232,6 +232,145 @@ const SCHEMA_DDL = [
     payload JSONB NOT NULL,
     PRIMARY KEY (tenant_id, id)
   )`,
+
+  // ---- Phase 2: journals, idempotency, summaries, immutability -------------------------
+
+  // 1. Repair payloads double-encoded by the pre-Phase-1 adapter (stored as a jsonb string).
+  ...[
+    "stacklyra_users",
+    "stacklyra_products",
+    "stacklyra_orders",
+    "stacklyra_invoices",
+    "stacklyra_parties",
+    "stacklyra_ledger_entries",
+    "stacklyra_cashier_shifts",
+    "stacklyra_fiscal_periods",
+    "stacklyra_immutable_audit_logs",
+  ].map(
+    (t) =>
+      `UPDATE ${t} SET payload = (payload #>> '{}')::jsonb WHERE jsonb_typeof(payload) = 'string'`
+  ),
+  ...[
+    "subscription",
+    "pra_config",
+    "restaurant_tables",
+    "servers",
+    "stock_monitor",
+    "waiting_tasks",
+    "session_audit_logs",
+    "idempotency_records",
+  ].map(
+    (c) =>
+      `UPDATE stacklyra_tenants SET ${c} = (${c} #>> '{}')::jsonb WHERE jsonb_typeof(${c}) = 'string'`
+  ),
+
+  // 2. Real columns for totals and lookups, back-filled from payloads.
+  `ALTER TABLE stacklyra_orders ADD COLUMN IF NOT EXISTS grand_total_minor BIGINT`,
+  `ALTER TABLE stacklyra_orders ADD COLUMN IF NOT EXISTS tax_minor BIGINT`,
+  `ALTER TABLE stacklyra_orders ADD COLUMN IF NOT EXISTS payment_method TEXT`,
+  `UPDATE stacklyra_orders SET
+     grand_total_minor = COALESCE(
+       (payload->'taxBreakdown'->>'grandTotalMinor')::numeric,
+       round(COALESCE((payload->'taxBreakdown'->>'grandTotal')::numeric, 0) * 100)
+     )::bigint,
+     tax_minor = round(COALESCE((payload->'taxBreakdown'->>'totalSalesTax')::numeric, 0) * 100)::bigint,
+     payment_method = COALESCE(payload->>'paymentMethod', '')
+   WHERE grand_total_minor IS NULL`,
+  `ALTER TABLE stacklyra_ledger_entries ADD COLUMN IF NOT EXISTS debit_minor BIGINT`,
+  `ALTER TABLE stacklyra_ledger_entries ADD COLUMN IF NOT EXISTS credit_minor BIGINT`,
+  `ALTER TABLE stacklyra_ledger_entries ADD COLUMN IF NOT EXISTS voucher_no TEXT`,
+
+  // 3. Indexes for paging and search.
+  `CREATE INDEX IF NOT EXISTS idx_sl_orders_tenant_created ON stacklyra_orders (tenant_id, created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_sl_orders_tenant_invoice ON stacklyra_orders (tenant_id, lower(invoice_number))`,
+  `CREATE INDEX IF NOT EXISTS idx_sl_ledger_tenant_created ON stacklyra_ledger_entries (tenant_id, created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_sl_ledger_tenant_party ON stacklyra_ledger_entries (tenant_id, party_id, created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_sl_audit_tenant_ts ON stacklyra_immutable_audit_logs (tenant_id, timestamp DESC, id DESC)`,
+
+  // 4. Session audit log and idempotency move out of JSON columns into tables.
+  `CREATE TABLE IF NOT EXISTS stacklyra_session_audit_logs (
+    tenant_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    PRIMARY KEY (tenant_id, id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sl_session_audit_tenant_ts ON stacklyra_session_audit_logs (tenant_id, timestamp DESC, id DESC)`,
+  `CREATE TABLE IF NOT EXISTS stacklyra_idempotency (
+    tenant_id TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    key TEXT NOT NULL,
+    response_status INTEGER NOT NULL,
+    response_body JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, scope, key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sl_idempotency_created ON stacklyra_idempotency (created_at)`,
+  `INSERT INTO stacklyra_session_audit_logs (tenant_id, id, timestamp, payload)
+   SELECT t.id, e->>'id', COALESCE(e->>'timestamp', ''), e
+     FROM stacklyra_tenants t,
+          jsonb_array_elements(CASE WHEN jsonb_typeof(t.session_audit_logs) = 'array'
+                                    THEN t.session_audit_logs ELSE '[]'::jsonb END) e
+    WHERE e->>'id' IS NOT NULL
+   ON CONFLICT DO NOTHING`,
+  `UPDATE stacklyra_tenants SET session_audit_logs = '[]'::jsonb WHERE session_audit_logs <> '[]'::jsonb`,
+  `INSERT INTO stacklyra_idempotency (tenant_id, scope, key, response_status, response_body, created_at)
+   SELECT t.id, e->>'scope', e->>'key', COALESCE((e->>'responseStatus')::int, 200),
+          jsonb_build_object('body', COALESCE(e->'responseBody', 'null'::jsonb)),
+          COALESCE(NULLIF(e->>'createdAt', '')::timestamptz, now())
+     FROM stacklyra_tenants t,
+          jsonb_array_elements(CASE WHEN jsonb_typeof(t.idempotency_records) = 'array'
+                                    THEN t.idempotency_records ELSE '[]'::jsonb END) e
+    WHERE e->>'key' IS NOT NULL AND e->>'scope' IS NOT NULL
+   ON CONFLICT DO NOTHING`,
+  `UPDATE stacklyra_tenants SET idempotency_records = '[]'::jsonb WHERE idempotency_records <> '[]'::jsonb`,
+
+  // 5. Append-only enforcement in the database itself (error code SL001).
+  `CREATE OR REPLACE FUNCTION stacklyra_audit_append_only() RETURNS trigger AS $fn$
+   BEGIN
+     IF TG_OP = 'UPDATE' AND jsonb_typeof(OLD.payload) = 'string' THEN
+       RETURN NEW; -- one-time repair of double-encoded payloads
+     END IF;
+     RAISE EXCEPTION 'Audit log entries are append-only (attempted %).', TG_OP
+       USING ERRCODE = 'SL001';
+   END
+   $fn$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE TRIGGER trg_sl_audit_append_only
+     BEFORE UPDATE OR DELETE ON stacklyra_immutable_audit_logs
+     FOR EACH ROW EXECUTE FUNCTION stacklyra_audit_append_only()`,
+  `CREATE OR REPLACE FUNCTION stacklyra_ledger_append_only() RETURNS trigger AS $fn$
+   DECLARE
+     reversal_keys text[] := ARRAY['isReversed', 'reversedByEntryId', 'reversedByVoucherNo', 'reversedAt', 'tenantId'];
+   BEGIN
+     IF TG_OP = 'DELETE' THEN
+       RAISE EXCEPTION 'Ledger entries cannot be deleted; post a reversal instead.'
+         USING ERRCODE = 'SL001';
+     END IF;
+     IF jsonb_typeof(OLD.payload) = 'string' THEN
+       RETURN NEW; -- one-time repair of double-encoded payloads
+     END IF;
+     IF NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+        OR NEW.id IS DISTINCT FROM OLD.id
+        OR NEW.party_id IS DISTINCT FROM OLD.party_id
+        OR NEW.created_at IS DISTINCT FROM OLD.created_at
+        OR (OLD.debit_minor IS NOT NULL AND NEW.debit_minor IS DISTINCT FROM OLD.debit_minor)
+        OR (OLD.credit_minor IS NOT NULL AND NEW.credit_minor IS DISTINCT FROM OLD.credit_minor)
+        OR (OLD.payload - reversal_keys) IS DISTINCT FROM (NEW.payload - reversal_keys) THEN
+       RAISE EXCEPTION 'Posted ledger entries cannot be edited; post a reversal and a correcting voucher instead.'
+         USING ERRCODE = 'SL001';
+     END IF;
+     RETURN NEW;
+   END
+   $fn$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE TRIGGER trg_sl_ledger_append_only
+     BEFORE UPDATE OR DELETE ON stacklyra_ledger_entries
+     FOR EACH ROW EXECUTE FUNCTION stacklyra_ledger_append_only()`,
+  // Back-fill ledger amount columns (allowed by the trigger while the columns are still NULL).
+  `UPDATE stacklyra_ledger_entries SET
+     debit_minor = COALESCE((payload->>'debitMinor')::numeric, round(COALESCE((payload->>'debit')::numeric, 0) * 100))::bigint,
+     credit_minor = COALESCE((payload->>'creditMinor')::numeric, round(COALESCE((payload->>'credit')::numeric, 0) * 100))::bigint,
+     voucher_no = COALESCE(payload->>'voucherNo', '')
+   WHERE debit_minor IS NULL`,
 ];
 
 /**
@@ -298,13 +437,35 @@ interface CollectionSpec {
   columns: ColumnSpec[];
   hasPayload: boolean;
   orderBy?: string;
-  /** Load only the newest N rows (the in-memory list is capped to the same size). */
-  limit?: number;
-  /** Rows are never deleted from the database, even when dropped from the in-memory list. */
-  appendOnly?: boolean;
+  /**
+   * Append-only journal (orders, ledger, audit logs). Journals are never loaded in full:
+   * reads get the newest `recent` rows, and a write transaction starts with an EMPTY list,
+   * so anything a service adds is inserted and nothing is ever deleted. Individual rows can
+   * be pulled into a transaction with `loadJournalRows` when a service must update one.
+   */
+  journal?: { recent: number };
 }
 
 const str = (v: unknown) => (v === undefined || v === null ? "" : String(v));
+
+function minorOf(minor: unknown, major: unknown): number {
+  const m = Number(minor);
+  if (Number.isFinite(m) && minor !== undefined && minor !== null && minor !== "") {
+    return Math.round(m);
+  }
+  const v = Number(major);
+  return Number.isFinite(v) ? Math.round(v * 100) : 0;
+}
+
+function orderGrandTotalMinor(d: Doc): number {
+  const tb = (d.taxBreakdown || {}) as Doc;
+  return minorOf(tb.grandTotalMinor, tb.grandTotal);
+}
+
+function orderTaxMinor(d: Doc): number {
+  const tb = (d.taxBreakdown || {}) as Doc;
+  return minorOf(undefined, tb.totalSalesTax);
+}
 
 /**
  * The postgres driver JSON-encodes jsonb parameters itself, so values must be passed as
@@ -360,9 +521,13 @@ const COLLECTIONS: CollectionSpec[] = [
     idOf: (d) => str(d.id),
     hasPayload: true,
     orderBy: "created_at DESC",
+    journal: { recent: 50 },
     columns: [
       { name: "created_at", cast: "text", value: (d) => str(d.createdAt) },
       { name: "invoice_number", cast: "text", value: (d) => str(d.invoiceNumber) },
+      { name: "grand_total_minor", cast: "bigint", value: (d) => orderGrandTotalMinor(d) },
+      { name: "tax_minor", cast: "bigint", value: (d) => orderTaxMinor(d) },
+      { name: "payment_method", cast: "text", value: (d) => str(d.paymentMethod) },
     ],
   },
   {
@@ -394,9 +559,13 @@ const COLLECTIONS: CollectionSpec[] = [
     idOf: (d) => str(d.id),
     hasPayload: true,
     orderBy: "created_at DESC",
+    journal: { recent: 100 },
     columns: [
       { name: "party_id", cast: "text", value: (d) => str(d.partyId) },
       { name: "created_at", cast: "text", value: (d) => str(d.createdAt) },
+      { name: "debit_minor", cast: "bigint", value: (d) => minorOf(d.debitMinor, d.debit) },
+      { name: "credit_minor", cast: "bigint", value: (d) => minorOf(d.creditMinor, d.credit) },
+      { name: "voucher_no", cast: "text", value: (d) => str(d.voucherNo) },
     ],
   },
   {
@@ -431,12 +600,22 @@ const COLLECTIONS: CollectionSpec[] = [
     idOf: (d) => str(d.id),
     hasPayload: true,
     orderBy: "timestamp DESC",
-    // appendAuditLog keeps the newest 300 in memory; the table keeps everything.
-    limit: 300,
-    appendOnly: true,
+    journal: { recent: 100 },
+    columns: [{ name: "timestamp", cast: "text", value: (d) => str(d.timestamp) }],
+  },
+  {
+    field: "sessionAuditLogs",
+    table: "stacklyra_session_audit_logs",
+    idColumn: "id",
+    idOf: (d) => str(d.id),
+    hasPayload: true,
+    orderBy: "timestamp DESC",
+    journal: { recent: 30 },
     columns: [{ name: "timestamp", cast: "text", value: (d) => str(d.timestamp) }],
   },
 ];
+
+export type JournalField = "orders" | "ledger" | "immutableAuditLogs" | "sessionAuditLogs";
 
 // Tenant-row fields stored as JSONB columns on stacklyra_tenants.
 const TENANT_JSON_FIELDS: Array<[keyof DatabaseSchema, string]> = [
@@ -445,8 +624,6 @@ const TENANT_JSON_FIELDS: Array<[keyof DatabaseSchema, string]> = [
   ["servers", "servers"],
   ["stockMonitor", "stock_monitor"],
   ["waitingTasks", "waiting_tasks"],
-  ["sessionAuditLogs", "session_audit_logs"],
-  ["idempotencyRecords", "idempotency_records"],
 ];
 
 // ---------------------------------------------------------------------------
@@ -524,14 +701,33 @@ export async function findTenantIdsForUser(
   return Array.from(new Set(rows.map((r) => String(r.tenant_id))));
 }
 
+/** One user's stored profile, or null. */
+export async function findUserRow(
+  q: Queryable,
+  tenantId: string,
+  userId: string
+): Promise<Doc | null> {
+  const rows = await run(
+    q,
+    `SELECT payload FROM stacklyra_users WHERE tenant_id = $1 AND id = $2 LIMIT 1`,
+    [tenantId, userId]
+  );
+  return rows[0] ? decodeJson<Doc>(rows[0].payload) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Load
 // ---------------------------------------------------------------------------
 
-/** Loads a tenant's stored state, or null when the tenant row does not exist. */
+/**
+ * Loads a tenant's stored state, or null when the tenant row does not exist.
+ * - `read`: working set plus the newest rows of each journal (for responses).
+ * - `write`: working set only; journals start empty (see CollectionSpec.journal).
+ */
 export async function loadTenantState(
   q: Queryable,
-  tenantId: string
+  tenantId: string,
+  mode: "read" | "write" = "read"
 ): Promise<(Partial<DatabaseSchema> & { tenant: TenantOrganization }) | null> {
   const tenantRows = await run(
     q,
@@ -543,11 +739,12 @@ export async function loadTenantState(
 
   const collectionRows = await Promise.all(
     COLLECTIONS.map((spec) => {
+      if (spec.journal && mode === "write") return Promise.resolve([] as postgres.Row[]);
       const select = spec.hasPayload
         ? `payload`
         : `${spec.idColumn} AS __id, ${spec.columns.map((c) => c.name).join(", ")}`;
       const order = spec.orderBy ? ` ORDER BY ${spec.orderBy}, ${spec.idColumn} DESC` : "";
-      const limit = spec.limit ? ` LIMIT ${spec.limit}` : "";
+      const limit = spec.journal ? ` LIMIT ${spec.journal.recent}` : "";
       return run(
         q,
         `SELECT ${select} FROM ${spec.table} WHERE tenant_id = $1${order}${limit}`,
@@ -577,8 +774,27 @@ export async function loadTenantState(
       writable[spec.field] = rows.map((r) => decodeJson(r.payload));
     }
   });
+  // Idempotency records live in stacklyra_idempotency and are queried by key.
+  writable.idempotencyRecords = [];
 
   return state;
+}
+
+/** Loads specific journal rows by id (e.g. the ledger entry a reversal must mark). */
+export async function loadJournalRows(
+  q: Queryable,
+  tenantId: string,
+  field: JournalField,
+  ids: string[]
+): Promise<Doc[]> {
+  const spec = COLLECTIONS.find((c) => c.field === field);
+  if (!spec || !spec.journal || ids.length === 0) return [];
+  const rows = await run(
+    q,
+    `SELECT payload FROM ${spec.table} WHERE tenant_id = $1 AND ${spec.idColumn} = ANY($2::text[])`,
+    [tenantId, ids]
+  );
+  return rows.map((r) => decodeJson<Doc>(r.payload));
 }
 
 // ---------------------------------------------------------------------------
@@ -644,8 +860,8 @@ async function upsertTenantRow(tx: Queryable, state: DatabaseSchema, now: string
       json("servers", []),
       json("stockMonitor", []),
       json("waitingTasks", []),
-      json("sessionAuditLogs", []),
-      json("idempotencyRecords", []),
+      [], // session_audit_logs: moved to stacklyra_session_audit_logs
+      [], // idempotency_records: moved to stacklyra_idempotency
       t.createdAt || now,
       now,
     ]
@@ -722,7 +938,7 @@ export async function saveTenantDiff(
       }
     }
 
-    if (!spec.appendOnly) {
+    if (!spec.journal) {
       const removed = Array.from(beforeById.keys()).filter((id) => !seen.has(id));
       if (removed.length > 0) {
         await run(
@@ -736,6 +952,224 @@ export async function saveTenantDiff(
   }
 
   return stats;
+}
+
+// ---------------------------------------------------------------------------
+// Idempotency (stacklyra_idempotency)
+// ---------------------------------------------------------------------------
+
+/** Keys are kept this long, so an offline sale replayed weeks later still posts once. */
+export const IDEMPOTENCY_RETENTION_DAYS = 90;
+
+export async function findIdempotencyRecord(
+  q: Queryable,
+  tenantId: string,
+  scope: string,
+  key: string
+): Promise<{ responseStatus: number; responseBody: unknown } | null> {
+  const rows = await run(
+    q,
+    `SELECT response_status, response_body FROM stacklyra_idempotency
+      WHERE tenant_id = $1 AND scope = $2 AND key = $3`,
+    [tenantId, scope, key]
+  );
+  if (!rows[0]) return null;
+  return {
+    responseStatus: Number(rows[0].response_status),
+    responseBody: (decodeJson<{ body?: unknown }>(rows[0].response_body) || {}).body ?? null,
+  };
+}
+
+export async function storeIdempotencyRecord(
+  q: Queryable,
+  tenantId: string,
+  scope: string,
+  key: string,
+  responseStatus: number,
+  responseBody: unknown
+): Promise<void> {
+  await run(
+    q,
+    `INSERT INTO stacklyra_idempotency (tenant_id, scope, key, response_status, response_body)
+     VALUES ($1, $2, $3, $4::integer, $5::jsonb)
+     ON CONFLICT (tenant_id, scope, key) DO NOTHING`,
+    // Wrapped so a null/primitive body still fits the NOT NULL jsonb column.
+    [tenantId, scope, key, responseStatus, { body: responseBody ?? null }]
+  );
+  // Opportunistic pruning keeps the table bounded without a scheduler.
+  if (Math.random() < 0.01) {
+    await run(
+      q,
+      `DELETE FROM stacklyra_idempotency WHERE created_at < now() - ($1::text || ' days')::interval`,
+      [String(IDEMPOTENCY_RETENTION_DAYS)]
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Paged reads and summaries
+// ---------------------------------------------------------------------------
+
+export interface PageCursor {
+  at: string;
+  id: string;
+}
+
+export function encodeCursor(at: string, id: string): string {
+  return Buffer.from(JSON.stringify([at, id]), "utf-8").toString("base64url");
+}
+
+export function decodeCursor(raw?: string | null): PageCursor | null {
+  if (!raw) return null;
+  try {
+    const [at, id] = JSON.parse(Buffer.from(raw, "base64url").toString("utf-8"));
+    if (typeof at === "string" && typeof id === "string") return { at, id };
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
+const PAGE_TABLES = {
+  orders: { table: "stacklyra_orders", at: "created_at", atField: "createdAt" },
+  ledger: { table: "stacklyra_ledger_entries", at: "created_at", atField: "createdAt" },
+  audit: { table: "stacklyra_immutable_audit_logs", at: "timestamp", atField: "timestamp" },
+} as const;
+
+/**
+ * Keyset pagination, newest first. Filters are fixed SQL with bound parameters.
+ * - orders: `search` matches invoice / PRA number / customer; `from`/`to` are ISO bounds.
+ * - ledger: `partyId` limits to one party.
+ */
+export async function listJournalPage(
+  q: Queryable,
+  tenantId: string,
+  kind: keyof typeof PAGE_TABLES,
+  opts: {
+    cursor?: PageCursor | null;
+    limit?: number;
+    partyId?: string;
+    search?: string;
+    from?: string;
+    to?: string;
+  } = {}
+): Promise<Page<Doc>> {
+  const t = PAGE_TABLES[kind];
+  const limit = Math.min(Math.max(Math.floor(opts.limit || 50), 1), 500);
+  const where: string[] = ["tenant_id = $1"];
+  const params: unknown[] = [tenantId];
+  const add = (sqlFragment: (n: number) => string, value: unknown) => {
+    params.push(value);
+    where.push(sqlFragment(params.length));
+  };
+
+  if (opts.cursor) {
+    params.push(opts.cursor.at, opts.cursor.id);
+    where.push(`(${t.at}, id) < ($${params.length - 1}, $${params.length})`);
+  }
+  if (kind === "ledger" && opts.partyId) add((n) => `party_id = $${n}`, opts.partyId);
+  if (kind === "orders" && opts.search) {
+    add(
+      (n) =>
+        `(lower(invoice_number) LIKE $${n} OR lower(payload->>'praInvoiceNumber') LIKE $${n}
+          OR lower(payload->>'customerName') LIKE $${n})`,
+      `%${opts.search.trim().toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+    );
+  }
+  if (kind !== "audit" && opts.from) add((n) => `${t.at} >= $${n}`, opts.from);
+  if (kind !== "audit" && opts.to) add((n) => `${t.at} < $${n}`, opts.to);
+
+  params.push(limit + 1);
+  const rows = await run(
+    q,
+    `SELECT payload FROM ${t.table} WHERE ${where.join(" AND ")}
+      ORDER BY ${t.at} DESC, id DESC LIMIT $${params.length}`,
+    params
+  );
+  const docs = rows.map((r) => decodeJson<Doc>(r.payload));
+  const hasMore = docs.length > limit;
+  const items = hasMore ? docs.slice(0, limit) : docs;
+  const last = items[items.length - 1];
+  return {
+    items,
+    nextCursor:
+      hasMore && last ? encodeCursor(str(last[t.atField]), str(last.id)) : null,
+  };
+}
+
+export interface TenantSummary {
+  orders: {
+    count: number;
+    revenueMinor: number;
+    taxMinor: number;
+    /** Order revenue per month of `year` in time zone `timeZone`, Jan..Dec. */
+    monthlyRevenueMinor: number[];
+  };
+  ledgerCount: number;
+  auditCount: number;
+  year: number;
+  timeZone: string;
+}
+
+export async function getTenantSummary(
+  q: Queryable,
+  tenantId: string,
+  opts: { year: number; timeZone: string }
+): Promise<TenantSummary> {
+  const [totals] = await run(
+    q,
+    `SELECT count(*)::bigint AS n,
+            COALESCE(sum(grand_total_minor), 0)::bigint AS revenue,
+            COALESCE(sum(tax_minor), 0)::bigint AS tax
+       FROM stacklyra_orders WHERE tenant_id = $1`,
+    [tenantId]
+  );
+  const monthly = await run(
+    q,
+    `SELECT extract(month FROM (created_at::timestamptz AT TIME ZONE $2))::int AS m,
+            COALESCE(sum(grand_total_minor), 0)::bigint AS revenue
+       FROM stacklyra_orders
+      WHERE tenant_id = $1
+        AND created_at <> ''
+        AND extract(year FROM (created_at::timestamptz AT TIME ZONE $2))::int = $3
+      GROUP BY 1`,
+    [tenantId, opts.timeZone, opts.year]
+  );
+  const [counts] = await run(
+    q,
+    `SELECT (SELECT count(*) FROM stacklyra_ledger_entries WHERE tenant_id = $1)::bigint AS ledger,
+            (SELECT count(*) FROM stacklyra_immutable_audit_logs WHERE tenant_id = $1)::bigint AS audit`,
+    [tenantId]
+  );
+  const buckets = new Array<number>(12).fill(0);
+  for (const row of monthly) {
+    const m = Number(row.m);
+    if (m >= 1 && m <= 12) buckets[m - 1] = Number(row.revenue);
+  }
+  return {
+    orders: {
+      count: Number(totals.n),
+      revenueMinor: Number(totals.revenue),
+      taxMinor: Number(totals.tax),
+      monthlyRevenueMinor: buckets,
+    },
+    ledgerCount: Number(counts.ledger),
+    auditCount: Number(counts.audit),
+    year: opts.year,
+    timeZone: opts.timeZone,
+  };
+}
+
+/** True when Postgres knows this time zone name (guards the summary query). */
+export async function isKnownTimeZone(q: Queryable, tz: string): Promise<boolean> {
+  if (!/^[A-Za-z0-9_+\-/]{1,64}$/.test(tz)) return false;
+  const rows = await run(q, `SELECT 1 FROM pg_timezone_names WHERE name = $1 LIMIT 1`, [tz]);
+  return rows.length > 0;
 }
 
 // ---------------------------------------------------------------------------

@@ -33,6 +33,11 @@ if (!/^postgres(ql)?:\/\//.test(uri) || uri.includes("[YOUR-DATABASE-PASSWORD]")
 }
 
 const str = (v) => (v === undefined || v === null ? "" : String(v));
+const minorOf = (minor, major) => {
+  if (minor !== undefined && minor !== null && minor !== "" && Number.isFinite(Number(minor))) return Math.round(Number(minor));
+  const v = Number(major);
+  return Number.isFinite(v) ? Math.round(v * 100) : 0;
+};
 const now = new Date().toISOString();
 
 // Must match COLLECTIONS in src/lib/postgres.ts.
@@ -47,13 +52,21 @@ const COLLECTIONS = [
     cols: [["code", "text", (d) => str(d.code)], ["is_archived", "boolean", (d) => Boolean(d.isArchived)],
            ["updated_at", "text", () => now]] },
   { field: "orders", table: "stacklyra_orders", idColumn: "id", idOf: (d) => str(d.id), payload: true,
-    cols: [["created_at", "text", (d) => str(d.createdAt)], ["invoice_number", "text", (d) => str(d.invoiceNumber)]] },
+    journal: true,
+    cols: [["created_at", "text", (d) => str(d.createdAt)], ["invoice_number", "text", (d) => str(d.invoiceNumber)],
+           ["grand_total_minor", "bigint", (d) => minorOf(d.taxBreakdown?.grandTotalMinor, d.taxBreakdown?.grandTotal)],
+           ["tax_minor", "bigint", (d) => minorOf(undefined, d.taxBreakdown?.totalSalesTax)],
+           ["payment_method", "text", (d) => str(d.paymentMethod)]] },
   { field: "erpInvoices", table: "stacklyra_invoices", idColumn: "id", idOf: (d) => str(d.id), payload: true,
     cols: [["status", "text", (d) => str(d.status)], ["due_date", "text", (d) => str(d.dueDate)]] },
   { field: "parties", table: "stacklyra_parties", idColumn: "id", idOf: (d) => str(d.id), payload: true,
     cols: [["party_type", "text", (d) => str(d.type)], ["is_archived", "boolean", (d) => Boolean(d.isArchived)]] },
   { field: "ledger", table: "stacklyra_ledger_entries", idColumn: "id", idOf: (d) => str(d.id), payload: true,
-    cols: [["party_id", "text", (d) => str(d.partyId)], ["created_at", "text", (d) => str(d.createdAt)]] },
+    journal: true,
+    cols: [["party_id", "text", (d) => str(d.partyId)], ["created_at", "text", (d) => str(d.createdAt)],
+           ["debit_minor", "bigint", (d) => minorOf(d.debitMinor, d.debit)],
+           ["credit_minor", "bigint", (d) => minorOf(d.creditMinor, d.credit)],
+           ["voucher_no", "text", (d) => str(d.voucherNo)]] },
   { field: "documentCounters", table: "stacklyra_document_counters", idColumn: "key", idOf: (d) => str(d.key), payload: false,
     cols: [["seq", "integer", (d) => Number(d.seq) || 0]] },
   { field: "cashierShifts", table: "stacklyra_cashier_shifts", idColumn: "id", idOf: (d) => str(d.id), payload: true,
@@ -61,7 +74,9 @@ const COLLECTIONS = [
   { field: "fiscalPeriods", table: "stacklyra_fiscal_periods", idColumn: "period_key", idOf: (d) => str(d.periodKey), payload: true,
     cols: [] },
   { field: "immutableAuditLogs", table: "stacklyra_immutable_audit_logs", idColumn: "id", idOf: (d) => str(d.id), payload: true,
-    cols: [["timestamp", "text", (d) => str(d.timestamp)]] },
+    journal: true, cols: [["timestamp", "text", (d) => str(d.timestamp)]] },
+  { field: "sessionAuditLogs", table: "stacklyra_session_audit_logs", idColumn: "id", idOf: (d) => str(d.id), payload: true,
+    journal: true, cols: [["timestamp", "text", (d) => str(d.timestamp)]] },
 ];
 
 function readJson(file) {
@@ -118,8 +133,7 @@ async function importTenant(tx, { tenantId, snapshot }) {
          t.status || "TRIALING", t.planId || "growth", t.subscription,
          snapshot.praConfig || {}, snapshot.restaurantTables || [],
          snapshot.servers || [], snapshot.stockMonitor || [],
-         snapshot.waitingTasks || [], snapshot.sessionAuditLogs || [],
-         snapshot.idempotencyRecords || [], t.createdAt || now, now]
+         snapshot.waitingTasks || [], [], [], t.createdAt || now, now]
       );
     }
     report.inserted += 1;
@@ -140,7 +154,9 @@ async function importTenant(tx, { tenantId, snapshot }) {
       if (!id) { report.skipped += 1; continue; }
       const found = await tx.unsafe(
         `SELECT 1 FROM ${spec.table} WHERE tenant_id = $1 AND ${spec.idColumn} = $2`, [tenantId, id]);
-      if (found.length > 0 && !OVERWRITE) { report.skipped += 1; continue; }
+      // Journal rows (orders, ledger, audit) are never overwritten: the ledger and audit
+      // tables reject updates, and an existing journal row is the record of what happened.
+      if (found.length > 0 && (!OVERWRITE || spec.journal)) { report.skipped += 1; continue; }
 
       const names = ["tenant_id", spec.idColumn, ...spec.cols.map((c) => c[0])];
       const casts = ["text", "text", ...spec.cols.map((c) => c[1])];

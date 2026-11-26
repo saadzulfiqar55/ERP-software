@@ -93,6 +93,7 @@ import type {
   StockLevelMonitorItem,
   WaitingTaskItem,
 } from "@/lib/mock/erp-data";
+import type { TenantSummary } from "@/lib/postgres";
 import DishVisual from "@/components/DishVisual";
 import { WorkspaceSplash } from "@/components/shell/WorkspaceSplash";
 import { StackLyraLogo } from "@/components/ui/StackLyraLogo";
@@ -220,6 +221,9 @@ export function AlbarkaMaterial3ERP({
   const [immutableAuditLogs, setImmutableAuditLogs] = useState<
     ImmutableAuditLog[]
   >([]);
+  // Server-computed totals and counts; lists above only hold the newest rows + loaded pages.
+  const [summary, setSummary] = useState<TenantSummary | null>(null);
+  const [loadingMore, setLoadingMore] = useState<null | "orders" | "ledger" | "audit">(null);
   const [cashierShifts, setCashierShifts] = useState<CashierShift[]>([]);
   const [fiscalPeriods, setFiscalPeriods] = useState<FiscalPeriod[]>([]);
   const [countedCashInput, setCountedCashInput] = useState<string>("");
@@ -761,6 +765,7 @@ export function AlbarkaMaterial3ERP({
       setParties([]);
       setWaitingTasks([]);
       setImmutableAuditLogs([]);
+      setSummary(null);
       setActiveNav("dashboard");
       void fetchScopedState();
     }
@@ -854,14 +859,35 @@ export function AlbarkaMaterial3ERP({
     ? hasGranularPermission(currentUser.role, "accounting:ledger:view")
     : false;
 
+  // All-time totals come from /api/summary; the local sum is only an offline fallback.
   const totalSalesRevenue = useMemo(
-    () => orders.reduce((s, o) => s + o.taxBreakdown.grandTotal, 0),
-    [orders]
+    () =>
+      summary
+        ? summary.orders.revenueMinor / 100
+        : orders.reduce((s, o) => s + o.taxBreakdown.grandTotal, 0),
+    [orders, summary]
   );
   const totalPraTaxCollected = useMemo(
-    () => orders.reduce((s, o) => s + o.taxBreakdown.totalSalesTax, 0),
-    [orders]
+    () =>
+      summary
+        ? summary.orders.taxMinor / 100
+        : orders.reduce((s, o) => s + o.taxBreakdown.totalSalesTax, 0),
+    [orders, summary]
   );
+  const totalOrderCount = summary ? summary.orders.count : orders.length;
+  const totalLedgerCount = summary && canViewLedger ? summary.ledgerCount : ledger.length;
+  const totalAuditCount =
+    summary && canViewLedger ? summary.auditCount : immutableAuditLogs.length;
+
+  // Refresh server totals whenever the lists change (after sales, postings, reloads).
+  useEffect(() => {
+    if (!currentUser) return;
+    const timer = setTimeout(() => {
+      void fetchSummary();
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, orders, ledger, immutableAuditLogs]);
   const totalReceivables = useMemo(
     () =>
       parties
@@ -1294,7 +1320,12 @@ export function AlbarkaMaterial3ERP({
       setParties(data.db.parties);
       setLedger(data.db.ledger);
       setEditingEntryId(null);
-      notifySaved("Ledger voucher updated and party balance recalculated.");
+      notifySaved(
+        `Reversed ${data.reversal?.voucherNo || "the voucher"} and posted corrected voucher ${data.corrected?.voucherNo || ""}.`
+      );
+    } else {
+      const data = await res.json().catch(() => ({}));
+      notifySaved(data.error || "Could not correct the voucher.");
     }
   }
 
@@ -1314,7 +1345,7 @@ export function AlbarkaMaterial3ERP({
       if (data.db.immutableAuditLogs)
         setImmutableAuditLogs(data.db.immutableAuditLogs);
       if (editingEntryId === entryId) setEditingEntryId(null);
-      notifySaved(`Voided voucher ${voucherNo} and adjusted balance.`);
+      notifySaved(`Voided ${voucherNo} by posting reversal ${data.reversal?.voucherNo || ""}.`);
     } else {
       notifySaved(data.error || "Action blocked by Fiscal Period Lock.");
     }
@@ -1335,7 +1366,7 @@ export function AlbarkaMaterial3ERP({
       setLedger(data.db.ledger);
       if (data.db.immutableAuditLogs)
         setImmutableAuditLogs(data.db.immutableAuditLogs);
-      notifySaved(`Posted append-only Reversal Credit Note for ${voucherNo}.`);
+      notifySaved(`Posted reversal ${data.reversal?.voucherNo || ""} for ${voucherNo}.`);
     } else {
       notifySaved(data.error || "Reversal blocked by Fiscal Period Lock.");
     }
@@ -1837,41 +1868,83 @@ export function AlbarkaMaterial3ERP({
     notifySaved(`Removed profile "${userName}".`);
   }
 
+  async function fetchSummary() {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const year = new Date().getFullYear();
+      const res = await fetch(
+        `/api/summary?year=${year}&tz=${encodeURIComponent(tz)}`
+      );
+      if (res.ok) setSummary((await res.json()) as TenantSummary);
+    } catch {
+      // Offline: keep the last summary; totals fall back to loaded rows.
+    }
+  }
+
+  function encodeListCursor(at: string, id: string): string {
+    const json = JSON.stringify([at, id]);
+    const b64 = btoa(unescape(encodeURIComponent(json)));
+    return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  /** Appends the next page of orders / ledger entries / audit logs to the loaded list. */
+  async function loadMoreJournal(kind: "orders" | "ledger" | "audit") {
+    if (loadingMore) return;
+    const list: Array<{ id: string; createdAt?: string; timestamp?: string }> =
+      kind === "orders" ? orders : kind === "ledger" ? ledger : immutableAuditLogs;
+    const last = list[list.length - 1];
+    if (!last) return;
+    const at = (kind === "audit" ? last.timestamp : last.createdAt) || "";
+    const endpoint =
+      kind === "orders" ? "/api/orders" : kind === "ledger" ? "/api/ledger" : "/api/audit";
+    setLoadingMore(kind);
+    try {
+      const res = await fetch(
+        `${endpoint}?limit=100&cursor=${encodeURIComponent(encodeListCursor(at, last.id))}`
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        notifySaved(data.error || "Could not load more records.");
+        return;
+      }
+      const merge = <T extends { id: string }>(prev: T[]) => {
+        const seen = new Set(prev.map((x) => x.id));
+        return [...prev, ...(data.items as T[]).filter((x) => !seen.has(x.id))];
+      };
+      if (kind === "orders") setOrders((prev) => merge(prev));
+      else if (kind === "ledger") setLedger((prev) => merge(prev));
+      else setImmutableAuditLogs((prev) => merge(prev));
+    } catch {
+      notifySaved("Network error while loading more records.");
+    } finally {
+      setLoadingMore(null);
+    }
+  }
+
+  function renderLoadMore(kind: "orders" | "ledger" | "audit", loaded: number, total: number) {
+    if (loaded >= total || loaded === 0) return null;
+    return (
+      <div className="flex items-center justify-between gap-3 p-4 border-t border-md-divider text-xs text-md-on-surface-variant">
+        <span>
+          Showing {loaded.toLocaleString()} of {total.toLocaleString()}
+        </span>
+        <Button
+          variant="tonal"
+          size="sm"
+          disabled={loadingMore !== null}
+          onClick={() => void loadMoreJournal(kind)}
+        >
+          {loadingMore === kind ? "Loading…" : "Load more"}
+        </Button>
+      </div>
+    );
+  }
+
   function exportPRACsv() {
-    const headers = [
-      "InvoiceNumber",
-      "PRA_Fiscal_Invoice",
-      "USIN",
-      "DateTime",
-      "OrderType",
-      "Customer",
-      "BuyerNTN",
-      "PaymentMethod",
-      "TaxableValue_PKR",
-      "SalesTax_PKR",
-      "GrandTotal_PKR",
-      "PRASyncStatus",
-    ];
-    const rows = orders.map((o) => [
-      o.invoiceNumber,
-      o.praInvoiceNumber,
-      o.usin,
-      o.createdAt,
-      o.orderType,
-      `"${o.customerName || "Walk-in"}"`,
-      o.buyerNtnCnic || "",
-      o.paymentMethod,
-      o.taxBreakdown.taxableAmount,
-      o.taxBreakdown.totalSalesTax,
-      o.taxBreakdown.grandTotal,
-      o.praSyncStatus,
-    ]);
-    const csvContent =
-      "data:text/csv;charset=utf-8," +
-      [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    // Built on the server from every order, not just the rows loaded in this tab.
     const link = document.createElement("a");
-    link.setAttribute("href", encodeURI(csvContent));
-    link.setAttribute("download", `StackLyra_PRA_Sales_Tax_Register.csv`);
+    link.setAttribute("href", "/api/orders/export");
+    link.setAttribute("download", "StackLyra_PRA_Sales_Tax_Register.csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1978,7 +2051,7 @@ export function AlbarkaMaterial3ERP({
       case "pos":
         return cart.length;
       case "sales":
-        return orders.length;
+        return totalOrderCount;
       case "purchasing":
         return supplierCount;
       case "inventory":
@@ -1986,7 +2059,7 @@ export function AlbarkaMaterial3ERP({
       case "invoices":
         return erpInvoices.length;
       case "accounting":
-        return ledger.length;
+        return totalLedgerCount;
       case "hr":
         return users.length + servers.length;
       default:
@@ -2656,6 +2729,7 @@ export function AlbarkaMaterial3ERP({
           {activeNav === "dashboard" && (
             <DashboardView
               orders={orders}
+              ordersSummary={summary?.orders}
               erpInvoices={erpInvoices}
               parties={parties}
               tasks={waitingTasks}
@@ -3252,6 +3326,7 @@ export function AlbarkaMaterial3ERP({
                   </table>
                 </div>
                 )}
+                {renderLoadMore("orders", orders.length, totalOrderCount)}
               </Card>
             </div>
           )}
@@ -3727,7 +3802,7 @@ export function AlbarkaMaterial3ERP({
                     Posted double-entry vouchers
                   </div>
                   <div className="text-[22px] leading-[28px] font-normal font-mono tabular-nums mt-1">
-                    {ledger.length} entries
+                    {totalLedgerCount.toLocaleString()} entries
                   </div>
                 </div>
               </div>
@@ -3988,7 +4063,14 @@ export function AlbarkaMaterial3ERP({
                                 PKR {entry.balanceAfter.toLocaleString()}
                               </td>
                               <td className="py-3 px-4 text-right">
-                                <div className="inline-flex items-center gap-1">
+                                {entry.isReversed ? (
+                                  <StatusChip
+                                    label={`Reversed${entry.reversedByVoucherNo ? ` · ${entry.reversedByVoucherNo}` : ""}`}
+                                    variant="neutral"
+                                  />
+                                ) : entry.paymentMode === "REVERSAL_NOTE" || entry.reversesEntryId ? (
+                                  <StatusChip label="Reversal" variant="neutral" />
+                                ) : (
                                   <Button
                                     variant="tonal"
                                     size="sm"
@@ -4001,26 +4083,14 @@ export function AlbarkaMaterial3ERP({
                                   >
                                     Reverse
                                   </Button>
-                                  <Button
-                                    variant="icon"
-                                    aria-label="Delete voucher"
-                                    onClick={() =>
-                                      handleDeleteEntry(
-                                        entry.id,
-                                        entry.voucherNo
-                                      )
-                                    }
-                                    className="w-8! h-8!"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </Button>
-                                </div>
+                                )}
                               </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
+                    {renderLoadMore("ledger", ledger.length, totalLedgerCount)}
                   </Card>
                 </div>
               </div>
@@ -4724,7 +4794,7 @@ export function AlbarkaMaterial3ERP({
                 <Card className="p-0! overflow-hidden">
                   <div className="p-4 border-b border-md-divider">
                     <h2 className="text-base font-semibold text-md-on-surface">
-                      Immutable domain audit trail ({immutableAuditLogs.length}{" "}
+                      Immutable domain audit trail ({totalAuditCount.toLocaleString()}{" "}
                       records)
                     </h2>
                   </div>
@@ -4762,6 +4832,7 @@ export function AlbarkaMaterial3ERP({
                       </tbody>
                     </table>
                   </div>
+                  {renderLoadMore("audit", immutableAuditLogs.length, totalAuditCount)}
                 </Card>
               )}
               {settingsSubTab === "APPEARANCE" && (

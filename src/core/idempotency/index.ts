@@ -1,36 +1,28 @@
-import { DatabaseSchema } from "@/lib/db";
+import type { TransactionContext } from "@/core/db";
 
 /**
- * Idempotency Guard for Critical Mutations (POS Checkout, Ledger Posting)
- * Prevents duplicate financial transactions caused by double-clicks or offline queue retries.
+ * Idempotency guard for critical mutations (POS checkout, ledger posting).
+ * Prevents duplicate financial transactions from double-clicks or offline-queue replays.
+ *
+ * Records live in `stacklyra_idempotency` (kept 90 days) and are read and written inside
+ * the tenant's transaction, so concurrent replays of the same key resolve to one result.
  */
-export function lookupIdempotencyRecord(
-  db: DatabaseSchema,
+export async function lookupIdempotencyRecord(
+  ctx: TransactionContext,
   key: string | undefined,
   scope: string
-) {
+): Promise<{ responseStatus: number; responseBody: unknown } | null> {
   if (!key) return null;
-  const records = db.idempotencyRecords || [];
-  return records.find((r) => r.key === key && r.scope === scope) || null;
+  return ctx.findIdempotency(scope, key);
 }
 
-export function storeIdempotencyRecord(
-  db: DatabaseSchema,
+export async function storeIdempotencyRecord(
+  ctx: TransactionContext,
   key: string | undefined,
   scope: string,
   responseStatus: number,
   responseBody: unknown
-): void {
+): Promise<void> {
   if (!key) return;
-  const existing = db.idempotencyRecords || [];
-  db.idempotencyRecords = [
-    {
-      key,
-      scope,
-      createdAt: new Date().toISOString(),
-      responseStatus,
-      responseBody,
-    },
-    ...existing.slice(0, 199), // Retain recent 200 idempotency locks
-  ];
+  await ctx.storeIdempotency(scope, key, responseStatus, responseBody);
 }

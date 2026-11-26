@@ -12,9 +12,19 @@ import {
   INITIAL_USERS,
 } from "./seed-data";
 import {
+  decodeCursor,
+  findIdempotencyRecord,
+  findUserRow,
+  getTenantSummary,
+  isKnownTimeZone,
+  listJournalPage,
+  Page,
+  TenantSummary,
   findTenantIdsForUser,
   findTenantRow,
   getReadySql,
+  loadJournalRows,
+  storeIdempotencyRecord,
   isUsablePostgresUri,
   listTenantRows,
   loadTenantState,
@@ -350,9 +360,10 @@ export async function findTenantStrict(
 
 async function loadMergedState(
   q: Queryable,
-  tenantId: string
+  tenantId: string,
+  mode: "read" | "write" = "read"
 ): Promise<DatabaseSchema> {
-  const stored = await loadTenantState(q, tenantId);
+  const stored = await loadTenantState(q, tenantId, mode);
   if (!stored) throw new TenantNotFoundError(tenantId);
   return mergeWithTenantDefaults(stored.tenant, stored, getEnvDatabaseConfig());
 }
@@ -375,30 +386,78 @@ export async function readDbAsync(
 // ---------------------------------------------------------------------------
 
 /**
- * Runs `work` against a draft of the tenant's state inside one Postgres transaction:
- * lock tenant → load → work(draft) → write changed rows → commit.
- * If `work` throws, or any write fails, the transaction rolls back and the error propagates.
+ * Extra database access available to a transaction's `work`, all inside the same
+ * transaction and tenant lock.
+ */
+export interface TransactionContext {
+  /**
+   * Pulls specific ledger entries into the draft (journals start empty in a transaction),
+   * e.g. the entry a reversal must mark as reversed. Returns the draft copies.
+   */
+  loadLedgerEntries(ids: string[]): Promise<LedgerEntry[]>;
+  findIdempotency(
+    scope: string,
+    key: string
+  ): Promise<{ responseStatus: number; responseBody: unknown } | null>;
+  storeIdempotency(
+    scope: string,
+    key: string,
+    responseStatus: number,
+    responseBody: unknown
+  ): Promise<void>;
+}
+
+/**
+ * Runs `work` against a draft of the tenant's working set inside one Postgres transaction:
+ * lock tenant → load working set → work(draft, ctx) → write changed rows → commit.
+ *
+ * Journals (orders, ledger, audit logs) start EMPTY in the draft: services append to them
+ * and only the new rows are inserted. If `work` throws, or any write fails, the transaction
+ * rolls back and the error propagates.
+ *
+ * The returned `db` is a fresh read taken after commit (working set + recent journal rows),
+ * so responses show the committed state, not the partial draft.
  */
 export async function runTenantTransaction<T>(
   tenantId: string,
-  work: (txDb: DatabaseSchema) => Promise<T> | T
+  work: (txDb: DatabaseSchema, ctx: TransactionContext) => Promise<T> | T
 ): Promise<{ result: T; db: DatabaseSchema }> {
   const sql = await getDb();
   const tenant = await findTenantRow(sql, tenantId);
   if (!tenant) throw new TenantNotFoundError(tenantId);
 
-  const outcome = await sql.begin(async (tx) => {
+  const result = await sql.begin(async (tx) => {
     await lockTenant(tx, tenant.id);
-    const before = await loadMergedState(tx, tenant.id);
+    const before = await loadMergedState(tx, tenant.id, "write");
     const draft: DatabaseSchema = JSON.parse(JSON.stringify(before));
-    const result = await work(draft);
+
+    const ctx: TransactionContext = {
+      async loadLedgerEntries(ids) {
+        const wanted = ids.filter(
+          (id) => id && !draft.ledger.some((e) => e.id === id)
+        );
+        const rows = (await loadJournalRows(tx, tenant.id, "ledger", wanted)) as unknown as LedgerEntry[];
+        for (const row of rows) {
+          before.ledger.push(JSON.parse(JSON.stringify(row)));
+          draft.ledger.push(JSON.parse(JSON.stringify(row)));
+        }
+        return draft.ledger.filter((e) => ids.includes(e.id));
+      },
+      findIdempotency: (scope, key) => findIdempotencyRecord(tx, tenant.id, scope, key),
+      storeIdempotency: (scope, key, status, body) =>
+        storeIdempotencyRecord(tx, tenant.id, scope, key, status, body),
+    };
+
+    const workResult = await work(draft, ctx);
     if (draft.tenant.id !== tenant.id) {
       throw new Error("A transaction may not change the tenant id.");
     }
     await saveTenantDiff(tx, before, draft);
-    return { result, db: draft };
+    return workResult;
   });
-  return outcome as { result: T; db: DatabaseSchema };
+
+  const committed = await loadMergedState(sql, tenant.id, "read");
+  return { result: result as T, db: committed };
 }
 
 /**
@@ -544,4 +603,60 @@ export async function provisionNewTenantWorkspaceAsync(params: {
   }
 
   return { tenant, db: initialDb };
+}
+
+// ---------------------------------------------------------------------------
+// Lightweight reads for paged endpoints (no full tenant load)
+// ---------------------------------------------------------------------------
+
+/** The signed-in user's profile within a tenant, or null if the tenant/user is gone. */
+export async function getTenantUser(
+  tenantId: string,
+  userId: string
+): Promise<{ tenant: TenantOrganization; user: UserProfile } | null> {
+  const sql = await getDb();
+  const tenant = await findTenantRow(sql, tenantId);
+  if (!tenant) return null;
+  const row = await findUserRow(sql, tenant.id, userId);
+  if (!row) return null;
+  const user = row as unknown as UserProfile;
+  if (user.tenantId && user.tenantId !== tenant.id && user.tenantId !== "TENANT_ALBARKA") {
+    return null;
+  }
+  return { tenant, user };
+}
+
+export type JournalKind = "orders" | "ledger" | "audit";
+
+export async function readJournalPage(
+  tenantId: string,
+  kind: JournalKind,
+  opts: {
+    cursor?: string | null;
+    limit?: number;
+    partyId?: string;
+    search?: string;
+    from?: string;
+    to?: string;
+  }
+): Promise<Page<Record<string, unknown>>> {
+  const sql = await getDb();
+  return listJournalPage(sql, tenantId, kind, {
+    ...opts,
+    cursor: decodeCursor(opts.cursor),
+  });
+}
+
+export async function readTenantSummary(
+  tenantId: string,
+  opts: { year?: number; timeZone?: string }
+): Promise<TenantSummary> {
+  const sql = await getDb();
+  const year =
+    opts.year && opts.year >= 2000 && opts.year <= 2100
+      ? Math.floor(opts.year)
+      : new Date().getUTCFullYear();
+  const tz =
+    opts.timeZone && (await isKnownTimeZone(sql, opts.timeZone)) ? opts.timeZone : "UTC";
+  return getTenantSummary(sql, tenantId, { year, timeZone: tz });
 }

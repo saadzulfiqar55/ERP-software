@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { readErrorResponse, requireRequestActor } from "@/core/auth/request-actor";
+import { readJournalPage } from "@/lib/db";
 import { appendAuditLog, DEFAULT_BRANCH_ID } from "@/core/audit";
 import {
   assertActorPermission,
@@ -19,6 +21,25 @@ import { sanitizeNoSqlPayload } from "@/core/validation";
 import { PartyAccount, UserProfile } from "@/lib/types";
 import { AccountingService } from "@/modules/accounting/accounting.service";
 
+/**
+ * GET /api/ledger?cursor=&limit=&partyId=
+ * Pages through ledger entries, newest first, optionally for one party.
+ */
+export async function GET(request: Request) {
+  try {
+    const { tenant } = await requireRequestActor("accounting:ledger:view");
+    const url = new URL(request.url);
+    const page = await readJournalPage(tenant.id, "ledger", {
+      cursor: url.searchParams.get("cursor"),
+      limit: Number(url.searchParams.get("limit")) || 100,
+      partyId: url.searchParams.get("partyId") || undefined,
+    });
+    return NextResponse.json(page);
+  } catch (err) {
+    return readErrorResponse(err);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const sessionTenantId = await resolveAuthenticatedTenantId();
@@ -36,13 +57,13 @@ export async function POST(request: Request) {
     let actorRef: UserProfile | null = null;
 
     const { result, db } = await withTransaction(
-      async (txDb) => {
+      async (txDb, ctx) => {
         const actor = await assertActorPermission(txDb, "accounting:ledger:view");
         actorRef = actor;
         const tenantId = txDb.tenant.id;
 
-        const cached = lookupIdempotencyRecord(
-          txDb,
+        const cached = await lookupIdempotencyRecord(
+          ctx,
           idempotencyKey,
           `LEDGER_MUTATION:${tenantId}`
         );
@@ -138,15 +159,8 @@ export async function POST(request: Request) {
                 }
               : p
           );
-          txDb.ledger = txDb.ledger.map((entry) =>
-            entry.partyId === updatedParty.id
-              ? {
-                  ...entry,
-                  partyName: updatedParty.name,
-                  partyType: updatedParty.type,
-                }
-              : entry
-          );
+          // Ledger entries keep the party name they were posted with (history is immutable);
+          // screens show the current name from the party record.
           appendAuditLog(txDb, {
             tenantId,
             actorId: actor.id,
@@ -169,88 +183,43 @@ export async function POST(request: Request) {
           return { archivedPartyId: targetPartyId };
         }
 
-        // 5. Edit an existing Ledger Voucher Entry
+        // 5. Correct a posted voucher: reversal + new corrected voucher (never edited in place)
         if (body.action === "EDIT_ENTRY") {
-          const { entryId, description, debit, credit, voucherNo } = body as {
+          await assertActorPermission(txDb, "accounting:journal:reverse");
+          await assertActorPermission(txDb, "accounting:journal:post");
+          const { entryId, description, debit, credit } = body as {
             entryId: string;
             description: string;
             debit: number;
             credit: number;
-            voucherNo?: string;
           };
-          const entryIdx = txDb.ledger.findIndex((e) => e.id === entryId);
-          if (entryIdx === -1) {
-            throw new Error("Ledger entry not found");
-          }
-
-          const oldEntry = txDb.ledger[entryIdx];
-          AccountingService.assertFiscalPeriodOpen(txDb, oldEntry.createdAt);
-
-          const oldImpact = oldEntry.debit - oldEntry.credit;
-          const newDebit = Number(debit) || 0;
-          const newCredit = Number(credit) || 0;
-          const newImpact = newDebit - newCredit;
-          const deltaImpact = newImpact - oldImpact;
-
-          const pIdx = txDb.parties.findIndex((p) => p.id === oldEntry.partyId);
-          if (pIdx !== -1) {
-            const nextBal = txDb.parties[pIdx].currentBalance + deltaImpact;
-            txDb.parties[pIdx] = {
-              ...txDb.parties[pIdx],
-              currentBalance: nextBal,
-              currentBalanceMinor: toMinorUnits(nextBal),
-            };
-          }
-
-          txDb.ledger[entryIdx] = {
-            ...oldEntry,
-            tenantId,
-            voucherNo: voucherNo || oldEntry.voucherNo,
-            description: description || oldEntry.description,
-            debit: newDebit,
-            credit: newCredit,
-            debitMinor: toMinorUnits(newDebit),
-            creditMinor: toMinorUnits(newCredit),
-            balanceAfter: oldEntry.balanceAfter + deltaImpact,
-            balanceAfterMinor: toMinorUnits(oldEntry.balanceAfter + deltaImpact),
-          };
-
-          appendAuditLog(txDb, {
-            tenantId,
-            actorId: actor.id,
-            actorName: actor.name,
-            actorRole: actor.role,
-            module: "ACCOUNTING",
-            action: "UPDATE",
-            entityType: "LedgerVoucher",
-            entityId: entryId,
-            summary: `Adjusted voucher ${txDb.ledger[entryIdx].voucherNo} (Debit: ${newDebit}, Credit: ${newCredit}).`,
-          });
-
-          return { entry: txDb.ledger[entryIdx] };
+          await ctx.loadLedgerEntries([String(entryId || "")]);
+          const { reversal, corrected } = AccountingService.correctEntry(
+            txDb,
+            String(entryId || ""),
+            {
+              debitPkr: Number(debit) || 0,
+              creditPkr: Number(credit) || 0,
+              description: typeof description === "string" ? description : undefined,
+            },
+            actor
+          );
+          return { entry: corrected, reversal, corrected };
         }
 
-        // 6. Reverse / Credit-Note or Void a Ledger Entry
-        if (body.action === "REVERSE_ENTRY") {
+        // 6. Reverse a voucher. DELETE_ENTRY is kept for older clients and now also reverses:
+        //    posted entries are never removed.
+        if (body.action === "REVERSE_ENTRY" || body.action === "DELETE_ENTRY") {
           await assertActorPermission(txDb, "accounting:journal:reverse");
-          AccountingService.reverseOrVoidEntry(
+          const entryId = String(body.entryId || "");
+          await ctx.loadLedgerEntries([entryId]);
+          const reversal = AccountingService.reverseEntry(
             txDb,
-            body.entryId as string,
+            entryId,
             actor,
-            false
+            body.action === "DELETE_ENTRY" ? "voided" : undefined
           );
-          return { reversed: true };
-        }
-
-        if (body.action === "DELETE_ENTRY") {
-          await assertActorPermission(txDb, "accounting:journal:reverse");
-          AccountingService.reverseOrVoidEntry(
-            txDb,
-            body.entryId as string,
-            actor,
-            true
-          );
-          return { voided: true };
+          return { reversed: true, voided: body.action === "DELETE_ENTRY", reversal };
         }
 
         // 7. Default: Post Balanced Double-Entry Voucher
@@ -269,8 +238,8 @@ export async function POST(request: Request) {
         );
 
         const resPayload = { entry };
-        storeIdempotencyRecord(
-          txDb,
+        await storeIdempotencyRecord(
+          ctx,
           idempotencyKey,
           `LEDGER_MUTATION:${tenantId}`,
           200,

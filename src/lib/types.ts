@@ -389,7 +389,14 @@ export interface LedgerEntry {
   journalLines?: DoubleEntryLine[];
   relatedOrderId?: string;
   isReversal?: boolean;
+  /** Set on a reversal note: the entry it reverses. */
   reversesEntryId?: string;
   isReversed?: boolean;
+  /** Set on an original entry when it is reversed (the only change ever made to a posted entry). */
+  reversedByEntryId?: string;
+  reversedByVoucherNo?: string;
+  reversedAt?: string;
+  /** Set on a correcting voucher posted by an edit: the entry it replaces. */
+  correctsEntryId?: string;
   isImmutable?: boolean;
 }

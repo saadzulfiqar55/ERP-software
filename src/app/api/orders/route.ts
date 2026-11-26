@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { isoParam, readErrorResponse, requireRequestActor } from "@/core/auth/request-actor";
+import { readJournalPage } from "@/lib/db";
 import {
   assertActorPermission,
   resolveAuthenticatedTenantId,
@@ -13,6 +15,29 @@ import { SaaSEntitlementError } from "@/core/saas/entitlements";
 import { sanitizeNoSqlPayload } from "@/core/validation";
 import { UserProfile } from "@/lib/types";
 import { POSService } from "@/modules/pos/pos.service";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * GET /api/orders?cursor=&limit=&q=&from=&to=
+ * Pages through all POS orders, newest first. `q` matches invoice / PRA number / customer.
+ */
+export async function GET(request: Request) {
+  try {
+    const { tenant } = await requireRequestActor();
+    const url = new URL(request.url);
+    const page = await readJournalPage(tenant.id, "orders", {
+      cursor: url.searchParams.get("cursor"),
+      limit: Number(url.searchParams.get("limit")) || 50,
+      search: url.searchParams.get("q")?.slice(0, 100) || undefined,
+      from: isoParam(url.searchParams.get("from")),
+      to: isoParam(url.searchParams.get("to")),
+    });
+    return NextResponse.json(page);
+  } catch (err) {
+    return readErrorResponse(err);
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -31,12 +56,12 @@ export async function POST(request: Request) {
     let actorRef: UserProfile | null = null;
 
     const { result, db } = await withTransaction(
-      async (txDb) => {
+      async (txDb, ctx) => {
         const actor = await assertActorPermission(txDb, "pos:sale:create");
         actorRef = actor;
 
-        const cached = lookupIdempotencyRecord(
-          txDb,
+        const cached = await lookupIdempotencyRecord(
+          ctx,
           idempotencyKey,
           `POS_ORDER_CREATE:${txDb.tenant.id}`
         );
@@ -48,8 +73,8 @@ export async function POST(request: Request) {
 
         const saleResult = POSService.completeSaleTransaction(txDb, body, actor);
 
-        storeIdempotencyRecord(
-          txDb,
+        await storeIdempotencyRecord(
+          ctx,
           idempotencyKey,
           `POS_ORDER_CREATE:${txDb.tenant.id}`,
           200,

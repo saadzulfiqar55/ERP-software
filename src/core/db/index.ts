@@ -1,6 +1,13 @@
 import { DEFAULT_TENANT_ID } from "@/core/audit";
 import { resolveAuthenticatedTenantId } from "@/core/auth";
-import { DatabaseSchema, runTenantTransaction, TenantNotFoundError } from "@/lib/db";
+import {
+  DatabaseSchema,
+  runTenantTransaction,
+  TenantNotFoundError,
+  TransactionContext,
+} from "@/lib/db";
+
+export type { TransactionContext };
 import { DatabaseNotConfiguredError } from "@/lib/postgres";
 import type { PostgresSyncSection } from "@/lib/postgres";
 
@@ -16,7 +23,7 @@ import type { PostgresSyncSection } from "@/lib/postgres";
  * `_legacySections` is ignored: changed rows are detected automatically.
  */
 export async function withTransaction<T>(
-  work: (txDb: DatabaseSchema) => Promise<T> | T,
+  work: (txDb: DatabaseSchema, ctx: TransactionContext) => Promise<T> | T,
   _legacySections?: PostgresSyncSection[],
   explicitTenantId?: string
 ): Promise<{ result: T; db: DatabaseSchema }> {
@@ -73,6 +80,17 @@ export function mapDataLayerError(
 ): { status: number; body: { error: string; code: string } } | null {
   if (err instanceof TenantNotFoundError) {
     return { status: 404, body: { error: err.message, code: "TENANT_NOT_FOUND" } };
+  }
+  const sqlState = (err as { code?: unknown })?.code;
+  if (sqlState === "SL001") {
+    // Raised by the append-only triggers on ledger and audit tables.
+    return {
+      status: 409,
+      body: {
+        error: err instanceof Error ? err.message : "This record is append-only.",
+        code: "APPEND_ONLY",
+      },
+    };
   }
   if (err instanceof DatabaseNotConfiguredError) {
     console.error("[db] not configured:", err.message);

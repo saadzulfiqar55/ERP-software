@@ -1113,19 +1113,22 @@ export default function InvoicesView({
                                 >
                                   Void invoice
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    setVoidConfirmInvoice({
-                                      invoice: inv,
-                                      mode: "DELETE",
-                                    });
-                                  }}
-                                  className="w-full px-4 py-2 hover:bg-md-error-container text-md-error font-semibold"
-                                >
-                                  Delete invoice
-                                </button>
+                                {/* Only drafts were never issued, so only drafts can be deleted. */}
+                                {inv.status === "DRAFT" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMenuId(null);
+                                      setVoidConfirmInvoice({
+                                        invoice: inv,
+                                        mode: "DELETE",
+                                      });
+                                    }}
+                                    className="w-full px-4 py-2 hover:bg-md-error-container text-md-error font-semibold"
+                                  >
+                                    Delete draft
+                                  </button>
+                                )}
                               </>
                             )}
                           </div>

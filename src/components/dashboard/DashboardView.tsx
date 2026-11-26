@@ -34,7 +34,14 @@ import { Order, PartyAccount } from "@/lib/types";
 import { formatIsoDate, formatMinorMoney } from "@/lib/format";
 
 interface DashboardViewProps {
+  /** Newest orders only (for the "Recent sales" list). */
   orders: Order[];
+  /** All-time totals and this year's monthly revenue, computed by /api/summary. */
+  ordersSummary?: {
+    count: number;
+    revenueMinor: number;
+    monthlyRevenueMinor: number[];
+  };
   erpInvoices: ERPInvoice[];
   parties: PartyAccount[];
   tasks: WaitingTaskItem[];
@@ -49,6 +56,7 @@ interface DashboardViewProps {
 
 export default function DashboardView({
   orders,
+  ordersSummary,
   erpInvoices,
   parties,
   tasks,
@@ -85,9 +93,12 @@ export default function DashboardView({
 
   const liveOrdersRevenueMinor = useMemo(
     () =>
-      orders.reduce((sum, o) => sum + Math.round(o.taxBreakdown.grandTotal * 100), 0),
-    [orders]
+      ordersSummary
+        ? ordersSummary.revenueMinor
+        : orders.reduce((sum, o) => sum + Math.round(o.taxBreakdown.grandTotal * 100), 0),
+    [orders, ordersSummary]
   );
+  const totalOrderCount = ordersSummary ? ordersSummary.count : orders.length;
   const paidInvoicesRevenueMinor = useMemo(
     () =>
       erpInvoices
@@ -158,10 +169,16 @@ export default function DashboardView({
     ];
     const buckets = new Array<number>(12).fill(0);
 
-    for (const ord of orders) {
-      const d = new Date(ord.createdAt);
-      if (!Number.isNaN(d.getTime()) && d.getFullYear() === activeYear) {
-        buckets[d.getMonth()] += Math.round(ord.taxBreakdown.grandTotal * 100);
+    if (ordersSummary && ordersSummary.monthlyRevenueMinor.length === 12) {
+      ordersSummary.monthlyRevenueMinor.forEach((v, i) => {
+        buckets[i] += v;
+      });
+    } else {
+      for (const ord of orders) {
+        const d = new Date(ord.createdAt);
+        if (!Number.isNaN(d.getTime()) && d.getFullYear() === activeYear) {
+          buckets[d.getMonth()] += Math.round(ord.taxBreakdown.grandTotal * 100);
+        }
       }
     }
     for (const inv of erpInvoices) {
@@ -177,7 +194,7 @@ export default function DashboardView({
       revenueMinor: buckets[idx],
       isCurrent: idx === currentMonthIdx,
     }));
-  }, [orders, erpInvoices, activeYear, currentMonthIdx]);
+  }, [orders, ordersSummary, erpInvoices, activeYear, currentMonthIdx]);
 
   const maxBarMinor = Math.max(
     1,
@@ -224,15 +241,15 @@ export default function DashboardView({
           label="Revenue (live ledger)"
           value={formatMinorMoney(revenueMinor, "PKR")}
           icon={<TrendingUp className="w-5 h-5" strokeWidth={1.8} />}
-          chipLabel={`${orders.length} orders`}
+          chipLabel={`${totalOrderCount.toLocaleString()} orders`}
           chipVariant="primary"
           caption="POS + paid invoices"
         />
         <StatCard
           label="Sales orders & open bills"
-          value={`${orders.length + openInvoices.length}`}
+          value={`${(totalOrderCount + openInvoices.length).toLocaleString()}`}
           icon={<ShoppingBag className="w-5 h-5" strokeWidth={1.8} />}
-          chipLabel={`${orders.length} POS`}
+          chipLabel={`${totalOrderCount.toLocaleString()} POS`}
           chipVariant="primary"
           caption={`${openInvoices.length} open invoices`}
         />

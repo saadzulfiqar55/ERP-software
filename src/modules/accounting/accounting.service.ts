@@ -160,54 +160,40 @@ export const AccountingService = {
   },
 
   /**
-   * Append-Only Reversal / Credit Note Generator
+   * Append-only reversal: posts an equal and opposite voucher and marks the original as
+   * reversed. Posted entries are never deleted or edited (enforced by a database trigger).
+   * The original must already be in `txDb.ledger` (load it with ctx.loadLedgerEntries).
    */
-  reverseOrVoidEntry(
+  reverseEntry(
     txDb: DatabaseSchema,
     entryId: string,
     actor: UserProfile,
-    removeOriginalFromView: boolean = false
-  ): void {
+    reason?: string
+  ): LedgerEntry {
     assertTenantFeature(
       txDb.tenant,
       "khata_ledger",
       "Double-Entry Accounting & Khata Ledger"
     );
 
-    const tenantId = txDb.tenant.id;
     const targetIdx = txDb.ledger.findIndex((e) => e.id === entryId);
     if (targetIdx === -1) {
       throw new Error("Ledger entry not found.");
     }
-
     const original = txDb.ledger[targetIdx];
-    this.assertFiscalPeriodOpen(txDb, original.createdAt);
-
-    if (removeOriginalFromView) {
-      const reverseDelta = -(original.debit - original.credit);
-      const pIdx = txDb.parties.findIndex((p) => p.id === original.partyId);
-      if (pIdx !== -1) {
-        const nextBal = txDb.parties[pIdx].currentBalance + reverseDelta;
-        txDb.parties[pIdx] = {
-          ...txDb.parties[pIdx],
-          currentBalance: nextBal,
-          currentBalanceMinor: toMinorUnits(nextBal),
-        };
-      }
-      txDb.ledger = txDb.ledger.filter((e) => e.id !== entryId);
-      appendAuditLog(txDb, {
-        tenantId,
-        actorId: actor.id,
-        actorName: actor.name,
-        actorRole: actor.role,
-        module: "ACCOUNTING",
-        action: "REVERSE_VOID",
-        entityType: "LedgerVoucher",
-        entityId: entryId,
-        summary: `Voided & reversed voucher ${original.voucherNo} for "${original.partyName}".`,
-      });
-      return;
+    if (original.isReversed) {
+      throw new Error(
+        `Voucher ${original.voucherNo} is already reversed${
+          original.reversedByVoucherNo ? ` by ${original.reversedByVoucherNo}` : ""
+        }.`
+      );
     }
+    if (original.paymentMode === "REVERSAL_NOTE" || original.reversesEntryId) {
+      throw new Error(
+        `Voucher ${original.voucherNo} is itself a reversal and cannot be reversed. Post a new voucher instead.`
+      );
+    }
+    this.assertFiscalPeriodOpen(txDb, original.createdAt);
 
     const revVoucherNo = nextSequentialNumber(
       txDb,
@@ -215,20 +201,80 @@ export const AccountingService = {
       "REV",
       new Date().getFullYear()
     );
-    txDb.ledger[targetIdx] = { ...original, isReversed: true };
 
-    this.postVoucher(
+    const reversal = this.postVoucher(
       txDb,
       {
         partyId: original.partyId,
         debitPkr: original.credit,
         creditPkr: original.debit,
-        description: `REVERSAL CREDIT NOTE for ${original.voucherNo}: ${original.description}`,
+        description: `REVERSAL of ${original.voucherNo}${reason ? ` (${reason})` : ""}: ${original.description}`,
         paymentMode: "REVERSAL_NOTE",
         customVoucherNo: revVoucherNo,
       },
       actor
     );
+    txDb.ledger = txDb.ledger.map((e) =>
+      e.id === reversal.id ? { ...e, isReversal: true, reversesEntryId: original.id } : e
+    );
+
+    txDb.ledger = txDb.ledger.map((e) =>
+      e.id === original.id
+        ? {
+            ...e,
+            isReversed: true,
+            reversedByEntryId: reversal.id,
+            reversedByVoucherNo: revVoucherNo,
+            reversedAt: reversal.createdAt,
+          }
+        : e
+    );
+
+    appendAuditLog(txDb, {
+      tenantId: txDb.tenant.id,
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      module: "ACCOUNTING",
+      action: "REVERSE_VOID",
+      entityType: "LedgerVoucher",
+      entityId: original.id,
+      summary: `Reversed voucher ${original.voucherNo} for "${original.partyName}" with ${revVoucherNo}${reason ? ` (${reason})` : ""}.`,
+    });
+
+    return { ...reversal, isReversal: true, reversesEntryId: original.id };
+  },
+
+  /**
+   * Correcting a posted voucher = reverse it, then post a new voucher with the corrected
+   * amounts. Both stay in the ledger, so the history and running balances remain correct.
+   */
+  correctEntry(
+    txDb: DatabaseSchema,
+    entryId: string,
+    correction: { debitPkr: number; creditPkr: number; description?: string },
+    actor: UserProfile
+  ): { reversal: LedgerEntry; corrected: LedgerEntry } {
+    const original = txDb.ledger.find((e) => e.id === entryId);
+    if (!original) {
+      throw new Error("Ledger entry not found.");
+    }
+    const reversal = this.reverseEntry(txDb, entryId, actor, "corrected");
+    const corrected = this.postVoucher(
+      txDb,
+      {
+        partyId: original.partyId,
+        debitPkr: correction.debitPkr,
+        creditPkr: correction.creditPkr,
+        description: `${correction.description || original.description} (corrects ${original.voucherNo})`,
+        paymentMode: original.paymentMode,
+      },
+      actor
+    );
+    txDb.ledger = txDb.ledger.map((e) =>
+      e.id === corrected.id ? { ...e, correctsEntryId: original.id } : e
+    );
+    return { reversal, corrected: { ...corrected, correctsEntryId: original.id } };
   },
 
   /**

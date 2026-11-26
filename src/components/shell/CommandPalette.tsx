@@ -35,6 +35,33 @@ export default function CommandPalette({
   userRole = "CASHIER",
 }: CommandPaletteProps) {
   const [query, setQuery] = useState<string>("");
+  // Orders beyond the newest page live only on the server; search them there.
+  const [remoteOrders, setRemoteOrders] = useState<Order[]>([]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || q.length < 3) {
+      setRemoteOrders([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/orders?limit=5&q=${encodeURIComponent(q)}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setRemoteOrders(Array.isArray(data.items) ? (data.items as Order[]) : []);
+      } catch {
+        // Aborted or offline: local matches still show.
+      }
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, open]);
 
   // Listen for Ctrl+K / Cmd+K globally
   useEffect(() => {
@@ -76,17 +103,23 @@ export default function CommandPalette({
           .slice(0, 3)
       : [];
 
-    const matchedOrders = orders
-      .filter(
-        (o) =>
-          !q ||
-          o.invoiceNumber.toLowerCase().includes(q) ||
-          (o.customerName && o.customerName.toLowerCase().includes(q))
-      )
-      .slice(0, 3);
+    const localOrders = orders.filter(
+      (o) =>
+        !q ||
+        o.invoiceNumber.toLowerCase().includes(q) ||
+        (o.customerName && o.customerName.toLowerCase().includes(q))
+    );
+    const seenOrderIds = new Set<string>();
+    const matchedOrders = [...localOrders, ...(q ? remoteOrders : [])]
+      .filter((o) => {
+        if (seenOrderIds.has(o.id)) return false;
+        seenOrderIds.add(o.id);
+        return true;
+      })
+      .slice(0, 5);
 
     return { matchedNav, matchedProducts, matchedParties, matchedOrders };
-  }, [query, products, parties, orders, userRole]);
+  }, [query, products, parties, orders, remoteOrders, userRole]);
 
   if (!open) return null;
 

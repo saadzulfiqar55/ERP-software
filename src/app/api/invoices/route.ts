@@ -41,6 +41,12 @@ export async function POST(request: Request) {
           }
 
           if (action === "DELETE") {
+            // Only drafts were never issued to a customer; anything sent or paid is voided.
+            if (target.status !== "DRAFT") {
+              throw new Error(
+                `Invoice ${target.invoiceNumber} is ${target.status.toLowerCase()} and cannot be deleted. Void it instead.`
+              );
+            }
             txDb.erpInvoices = currentList.filter((i) => i.id !== invoiceId);
             appendAuditLog(txDb, {
               tenantId,
