@@ -25,14 +25,15 @@ import type { PostgresSyncSection } from "@/lib/postgres";
 export async function withTransaction<T>(
   work: (txDb: DatabaseSchema, ctx: TransactionContext) => Promise<T> | T,
   _legacySections?: PostgresSyncSection[],
-  explicitTenantId?: string
+  explicitTenantId?: string,
+  options: { readBack?: boolean } = {}
 ): Promise<{ result: T; db: DatabaseSchema }> {
   void _legacySections;
   const tenantId = explicitTenantId || (await resolveAuthenticatedTenantId());
   if (!tenantId) {
     throw new Error("Authentication required: Sign in with an active workspace profile.");
   }
-  return runTenantTransaction(tenantId, work);
+  return runTenantTransaction(tenantId, work, options);
 }
 
 /**

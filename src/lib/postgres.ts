@@ -117,12 +117,58 @@ function getPool(): Sql {
   return sql;
 }
 
+// Postgres type OIDs used to declare parameter types up front.
+const OID = { bool: 16, int4: 23, text: 25, float8: 701, textArray: 1009, jsonb: 3802 } as const;
+const INT4_MIN = -2147483648;
+const INT4_MAX = 2147483647;
+
+/** Marks a value as jsonb (arrays would otherwise be sent as text[]). */
+export function jsonParam(value: unknown) {
+  return { __jsonb: true as const, value };
+}
+
+function isTypedParameter(v: unknown): boolean {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    (v as { constructor?: { name?: string } }).constructor?.name === "Parameter"
+  );
+}
+
+/**
+ * With `prepare: false` (required by the Supabase transaction pooler) the driver needs a
+ * separate round trip to ask the server for parameter types unless every parameter's type
+ * is declared. Declaring them halves the latency of each query.
+ * Large integers are sent as text; the SQL casts them (e.g. `$1::bigint`).
+ */
+function typeParam(sqlHelper: Queryable, v: unknown): unknown {
+  if (isTypedParameter(v)) return v;
+  if (v && typeof v === "object" && (v as { __jsonb?: boolean }).__jsonb) {
+    return sqlHelper.typed((v as { value: unknown }).value as never, OID.jsonb);
+  }
+  if (v === null || v === undefined) return sqlHelper.typed(null as never, OID.text);
+  if (typeof v === "string") return sqlHelper.typed(v as never, OID.text);
+  if (typeof v === "boolean") return sqlHelper.typed(v as never, OID.bool);
+  if (typeof v === "number") {
+    if (Number.isInteger(v) && v >= INT4_MIN && v <= INT4_MAX) {
+      return sqlHelper.typed(v as never, OID.int4);
+    }
+    if (Number.isInteger(v)) return sqlHelper.typed(String(v) as never, OID.text);
+    return sqlHelper.typed(v as never, OID.float8);
+  }
+  if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
+    return sqlHelper.typed(v as never, OID.textArray);
+  }
+  return sqlHelper.typed(v as never, OID.jsonb);
+}
+
 function run<T extends unknown[] = postgres.Row[]>(
   q: Queryable,
   text: string,
   params: unknown[] = []
 ) {
-  return q.unsafe<T & postgres.Row[]>(text, params as never[]);
+  const typed = params.map((p) => typeParam(q, p));
+  return q.unsafe<T & postgres.Row[]>(text, typed as never[]);
 }
 
 // ---------------------------------------------------------------------------
@@ -374,9 +420,29 @@ const SCHEMA_DDL = [
 ];
 
 /**
- * Returns a ready connection pool. On first use per process it creates the schema
- * (serialized across instances by an advisory lock) and runs `onFirstReady`
- * (used to seed the flagship tenant).
+ * Bump when SCHEMA_DDL changes. A cold start only reads this number (one query); the DDL,
+ * one-time repairs and back-fills run once per version, not on every server instance.
+ */
+export const SCHEMA_VERSION = 2;
+
+async function readSchemaVersion(q: Queryable): Promise<number> {
+  try {
+    const rows = await run(
+      q,
+      `SELECT version FROM stacklyra_schema_meta WHERE key = 'schema' LIMIT 1`
+    );
+    return rows[0] ? Number(rows[0].version) : 0;
+  } catch (err) {
+    if ((err as { code?: string })?.code === "42P01") return 0; // table not created yet
+    throw err;
+  }
+}
+
+/**
+ * Returns a ready connection pool. The first call per process checks the schema version
+ * (one query) and only when it is behind runs SCHEMA_DDL inside a transaction holding a
+ * global advisory lock, with lock/statement timeouts so it can never hang a request.
+ * `onFirstReady` (seeding the flagship tenant) also runs once per process.
  */
 export async function getReadySql(
   onFirstReady?: (sql: Sql) => Promise<void>
@@ -384,12 +450,34 @@ export async function getReadySql(
   const sql = getPool();
   if (!globalThis.__stacklyraPgReady) {
     globalThis.__stacklyraPgReady = (async () => {
-      await sql.begin(async (tx) => {
-        await run(tx, `SELECT pg_advisory_xact_lock(hashtextextended('stacklyra:schema', 0))`);
-        for (const ddl of SCHEMA_DDL) {
-          await run(tx, ddl);
-        }
-      });
+      if ((await readSchemaVersion(sql)) < SCHEMA_VERSION) {
+        const started = Date.now();
+        await sql.begin(async (tx) => {
+          await run(tx, `SET LOCAL lock_timeout = '10s'`);
+          await run(tx, `SET LOCAL statement_timeout = '120s'`);
+          await run(tx, `SELECT pg_advisory_xact_lock(hashtextextended('stacklyra:schema', 0))`);
+          await run(
+            tx,
+            `CREATE TABLE IF NOT EXISTS stacklyra_schema_meta (
+               key TEXT PRIMARY KEY,
+               version INTEGER NOT NULL,
+               updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+             )`
+          );
+          // Another instance may have upgraded while we waited for the lock.
+          if ((await readSchemaVersion(tx)) >= SCHEMA_VERSION) return;
+          for (const ddl of SCHEMA_DDL) {
+            await run(tx, ddl);
+          }
+          await run(
+            tx,
+            `INSERT INTO stacklyra_schema_meta (key, version) VALUES ('schema', $1::integer)
+             ON CONFLICT (key) DO UPDATE SET version = EXCLUDED.version, updated_at = now()`,
+            [SCHEMA_VERSION]
+          );
+        });
+        console.info(`[db] schema checked/upgraded to v${SCHEMA_VERSION} in ${Date.now() - started} ms`);
+      }
       if (onFirstReady) await onFirstReady(sql);
     })().catch((err) => {
       globalThis.__stacklyraPgReady = undefined;
@@ -406,15 +494,22 @@ export async function getReadySql(
 
 /**
  * Takes the per-tenant write lock for the rest of the current transaction and sets the
- * tenant RLS context. Works with the transaction pooler because it is transaction-scoped.
+ * timeouts and tenant RLS context. Both statements are pipelined: one network round trip.
+ * The settings statement is sent first, so lock_timeout applies to the lock wait.
  */
 export async function lockTenant(tx: Queryable, tenantId: string): Promise<void> {
-  await run(tx, `SET LOCAL lock_timeout = '15s'`);
-  await run(tx, `SET LOCAL statement_timeout = '30s'`);
-  await run(tx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [
-    `stacklyra:tenant:${tenantId}`,
+  await Promise.all([
+    run(
+      tx,
+      `SELECT set_config('lock_timeout', '15s', true),
+              set_config('statement_timeout', '30s', true),
+              set_config('app.current_tenant', $1, true)`,
+      [tenantId]
+    ),
+    run(tx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [
+      `stacklyra:tenant:${tenantId}`,
+    ]),
   ]);
-  await run(tx, `SELECT set_config('app.current_tenant', $1, true)`, [tenantId]);
 }
 
 // ---------------------------------------------------------------------------
@@ -678,14 +773,15 @@ export async function findTenantRow(
 /** Returns the tenant ids that contain a user matching the given id or username/email. */
 export async function findTenantIdsForUser(
   q: Queryable,
-  params: { tenantId?: string; userId?: string; identifier?: string }
+  params: { tenantIdOrSlug?: string; userId?: string; identifier?: string }
 ): Promise<string[]> {
+  // Workspace (id or slug) and user are resolved in one query.
   const rows = await run(
     q,
     `SELECT u.tenant_id
        FROM stacklyra_users u
        JOIN stacklyra_tenants t ON t.id = u.tenant_id
-      WHERE ($1::text IS NULL OR u.tenant_id = $1)
+      WHERE ($1::text IS NULL OR lower(t.id) = $1 OR lower(t.slug) = $1)
         AND (
           ($2::text IS NOT NULL AND u.id = $2)
           OR ($3::text IS NOT NULL AND (lower(u.username) = $3 OR lower(u.email) = $3))
@@ -693,7 +789,7 @@ export async function findTenantIdsForUser(
       ORDER BY t.created_at ASC
       LIMIT 20`,
     [
-      params.tenantId ?? null,
+      params.tenantIdOrSlug ? params.tenantIdOrSlug.trim().toLowerCase() : null,
       params.userId ?? null,
       params.identifier ? params.identifier.trim().toLowerCase() : null,
     ]
@@ -727,19 +823,17 @@ export async function findUserRow(
 export async function loadTenantState(
   q: Queryable,
   tenantId: string,
-  mode: "read" | "write" = "read"
+  mode: "read" | "write" = "read",
+  /** Load only these collections (others come back empty), e.g. ["users"] for sign-in. */
+  only?: Array<keyof DatabaseSchema>
 ): Promise<(Partial<DatabaseSchema> & { tenant: TenantOrganization }) | null> {
-  const tenantRows = await run(
-    q,
-    `SELECT * FROM stacklyra_tenants WHERE id = $1 LIMIT 1`,
-    [tenantId]
-  );
-  if (tenantRows.length === 0) return null;
-  const tRow = tenantRows[0];
-
-  const collectionRows = await Promise.all(
-    COLLECTIONS.map((spec) => {
+  // All queries are issued together: on a transaction they are pipelined over one
+  // connection, on the pool they run in parallel — one round trip either way.
+  const [tenantRows, ...collectionRows] = await Promise.all([
+    run(q, `SELECT * FROM stacklyra_tenants WHERE id = $1 LIMIT 1`, [tenantId]),
+    ...COLLECTIONS.map((spec) => {
       if (spec.journal && mode === "write") return Promise.resolve([] as postgres.Row[]);
+      if (only && !only.includes(spec.field)) return Promise.resolve([] as postgres.Row[]);
       const select = spec.hasPayload
         ? `payload`
         : `${spec.idColumn} AS __id, ${spec.columns.map((c) => c.name).join(", ")}`;
@@ -750,8 +844,10 @@ export async function loadTenantState(
         `SELECT ${select} FROM ${spec.table} WHERE tenant_id = $1${order}${limit}`,
         [tenantId]
       );
-    })
-  );
+    }),
+  ]);
+  if (tenantRows.length === 0) return null;
+  const tRow = tenantRows[0];
 
   const state: Partial<DatabaseSchema> & { tenant: TenantOrganization } = {
     tenant: rowToTenant(tRow),
@@ -854,14 +950,14 @@ async function upsertTenantRow(tx: Queryable, state: DatabaseSchema, now: string
       t.ownerEmail,
       t.status,
       t.planId,
-      t.subscription,
-      json("praConfig", {}),
-      json("restaurantTables", []),
-      json("servers", []),
-      json("stockMonitor", []),
-      json("waitingTasks", []),
-      [], // session_audit_logs: moved to stacklyra_session_audit_logs
-      [], // idempotency_records: moved to stacklyra_idempotency
+      jsonParam(t.subscription),
+      jsonParam(json("praConfig", {})),
+      jsonParam(json("restaurantTables", [])),
+      jsonParam(json("servers", [])),
+      jsonParam(json("stockMonitor", [])),
+      jsonParam(json("waitingTasks", [])),
+      jsonParam([]), // session_audit_logs: moved to stacklyra_session_audit_logs
+      jsonParam([]), // idempotency_records: moved to stacklyra_idempotency
       t.createdAt || now,
       now,
     ]
@@ -880,7 +976,7 @@ async function upsertDoc(
   const casts = ["text", "text", ...spec.columns.map((c) => c.cast)];
   if (spec.hasPayload) {
     names.push("payload");
-    values.push({ ...doc, tenantId });
+    values.push(jsonParam({ ...doc, tenantId }));
     casts.push("jsonb");
   }
   const placeholders = values.map((_v, i) => `$${i + 1}::${casts[i]}`);
@@ -910,8 +1006,12 @@ export async function saveTenantDiff(
   const now = new Date().toISOString();
   const stats: TenantWriteStats = { upserted: 0, deleted: 0, tenantRowWritten: false };
 
+  // Writes are collected and sent together (pipelined on the transaction's connection):
+  // one round trip for the whole save instead of one per row.
+  const writes: Array<Promise<unknown>> = [];
+
   if (!before || tenantRowSignature(before) !== tenantRowSignature(after)) {
-    await upsertTenantRow(tx, after, now);
+    writes.push(upsertTenantRow(tx, after, now));
     stats.tenantRowWritten = true;
   }
 
@@ -933,7 +1033,7 @@ export async function saveTenantDiff(
       }
       seen.add(id);
       if (beforeById.get(id) !== JSON.stringify(doc)) {
-        await upsertDoc(tx, spec, tenantId, doc, now);
+        writes.push(upsertDoc(tx, spec, tenantId, doc, now));
         stats.upserted += 1;
       }
     }
@@ -941,16 +1041,17 @@ export async function saveTenantDiff(
     if (!spec.journal) {
       const removed = Array.from(beforeById.keys()).filter((id) => !seen.has(id));
       if (removed.length > 0) {
-        await run(
+        writes.push(run(
           tx,
           `DELETE FROM ${spec.table} WHERE tenant_id = $1 AND ${spec.idColumn} = ANY($2::text[])`,
           [tenantId, removed]
-        );
+        ));
         stats.deleted += removed.length;
       }
     }
   }
 
+  await Promise.all(writes);
   return stats;
 }
 
@@ -994,7 +1095,7 @@ export async function storeIdempotencyRecord(
      VALUES ($1, $2, $3, $4::integer, $5::jsonb)
      ON CONFLICT (tenant_id, scope, key) DO NOTHING`,
     // Wrapped so a null/primitive body still fits the NOT NULL jsonb column.
-    [tenantId, scope, key, responseStatus, { body: responseBody ?? null }]
+    [tenantId, scope, key, responseStatus, jsonParam({ body: responseBody ?? null })]
   );
   // Opportunistic pruning keeps the table bounded without a scheduler.
   if (Math.random() < 0.01) {

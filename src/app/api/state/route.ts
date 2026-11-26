@@ -14,7 +14,7 @@ import {
   SaaSEntitlementError,
 } from "@/core/saas/entitlements";
 import { sanitizeNoSqlPayload } from "@/core/validation";
-import { findTenantStrict, getEnvDatabaseConfig, readDbAsync } from "@/lib/db";
+import { findTenantStrict, getEnvDatabaseConfig, readDbAsync, readTenantAuthView } from "@/lib/db";
 import {
   normalizePostgresUri,
   pingPostgresConnection,
@@ -67,7 +67,7 @@ async function handleGet(request: Request) {
         { status: 404 }
       );
     }
-    const db = await readDbAsync(foundTenant.id);
+    const db = await readTenantAuthView(foundTenant.id);
     return NextResponse.json(
       buildScopedStateResponse(db, null, {
         allowUnauthenticatedStaffList: true,
@@ -75,7 +75,7 @@ async function handleGet(request: Request) {
     );
   }
 
-  const db = await readDbAsync(DEFAULT_TENANT_ID);
+  const db = await readTenantAuthView(DEFAULT_TENANT_ID);
   return NextResponse.json(
     buildScopedStateResponse(db, null, {
       allowUnauthenticatedStaffList: false,

@@ -23,7 +23,7 @@ import {
   findTenantStrict,
   listTenantsRegistry,
   provisionNewTenantWorkspaceAsync,
-  readDbAsync,
+  readTenantAuthView,
 } from "@/lib/db";
 import { hashPassword } from "@/lib/password";
 import {
@@ -92,7 +92,7 @@ async function handleGet(request: Request) {
     );
   }
 
-  const callerDb = await readDbAsync(verified.decoded.tid || DEFAULT_TENANT_ID);
+  const callerDb = await readTenantAuthView(verified.decoded.tid || DEFAULT_TENANT_ID);
   const caller = callerDb.users.find((u) => u.id === verified.decoded.sub);
   const isPlatformOwner =
     Boolean(caller?.isPlatformAdmin) && callerDb.tenant.id === DEFAULT_TENANT_ID;
@@ -138,7 +138,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const callerDb = await readDbAsync(
+      const callerDb = await readTenantAuthView(
         verified.decoded.tid || DEFAULT_TENANT_ID
       );
       const caller = callerDb.users.find((u) => u.id === verified.decoded.sub);
@@ -205,7 +205,8 @@ export async function POST(request: Request) {
           };
         },
         undefined,
-        targetTenant.id
+        targetTenant.id,
+        { readBack: false }
       );
 
       return NextResponse.json(

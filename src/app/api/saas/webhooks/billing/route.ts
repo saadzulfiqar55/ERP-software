@@ -153,7 +153,8 @@ export async function POST(request: Request) {
         };
       },
       undefined,
-      tenant.id
+      tenant.id,
+      { readBack: false }
     );
 
     return NextResponse.json(

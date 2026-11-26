@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { DEFAULT_TENANT_ID } from "@/core/audit";
 import { readVerifiedJwtCookie, sanitizeUserForClient } from "@/core/auth";
 import { sanitizeNoSqlPayload } from "@/core/validation";
-import { findUserAcrossTenantsAsync, readDbAsync } from "@/lib/db";
+import { findUserAcrossTenantsAsync, readTenantAuthView } from "@/lib/db";
 import { signJwt } from "@/lib/auth-jwt";
 import {
   buildSessionCookieOptions,
@@ -87,7 +87,7 @@ async function handleGet() {
 
   const { token, decoded } = verified;
   const tenantId = decoded.tid || DEFAULT_TENANT_ID;
-  const db = await readDbAsync(tenantId);
+  const db = await readTenantAuthView(tenantId);
   const user = db.users.find((u) => u.id === decoded.sub) || null;
 
   if (!user) {
@@ -142,7 +142,7 @@ export async function POST(request: Request) {
         // Signing out must always clear the cookie, even if the audit write fails.
         try {
         const { decoded } = verified;
-        const db = await readDbAsync(decoded.tid || DEFAULT_TENANT_ID);
+        const db = await readTenantAuthView(decoded.tid || DEFAULT_TENANT_ID);
         const actor = db.users.find((u) => u.id === decoded.sub);
 
         if (actor) {
@@ -161,7 +161,8 @@ export async function POST(request: Request) {
               txDb.sessionAuditLogs = [logEntry, ...txDb.sessionAuditLogs.slice(0, 29)];
             },
             undefined,
-            db.tenant.id
+            db.tenant.id,
+            { readBack: false }
           );
         }
         } catch (logoutErr) {
@@ -188,7 +189,7 @@ export async function POST(request: Request) {
         );
       }
       const { decoded } = verified;
-      const db = await readDbAsync(decoded.tid || DEFAULT_TENANT_ID);
+      const db = await readTenantAuthView(decoded.tid || DEFAULT_TENANT_ID);
       const user = db.users.find((u) => u.id === decoded.sub);
       if (!user) {
         return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -242,12 +243,13 @@ export async function POST(request: Request) {
         details: `Refreshed HS256 JWT token (${sessionId}) for +12h shift.`,
       };
 
-      const { db: refreshedDb } = await withTransaction(
+      await withTransaction(
         (txDb) => {
           txDb.sessionAuditLogs = [logEntry, ...txDb.sessionAuditLogs.slice(0, 29)];
         },
         undefined,
-        db.tenant.id
+        db.tenant.id,
+        { readBack: false }
       );
 
       cookieStore.set(
@@ -262,7 +264,7 @@ export async function POST(request: Request) {
         tenant: db.tenant,
         decodedJwt: fullPayload,
         activeSession: updatedSession,
-        sessionAuditLogs: refreshedDb.sessionAuditLogs,
+        sessionAuditLogs: [logEntry, ...db.sessionAuditLogs].slice(0, 30),
       });
     }
 
@@ -363,7 +365,8 @@ export async function POST(request: Request) {
           }
         },
         undefined,
-        db.tenant.id
+        db.tenant.id,
+        { readBack: false }
       );
     };
 
@@ -466,7 +469,7 @@ export async function POST(request: Request) {
 
     // Successful sign-in: reset the lockout counter, upgrade a legacy plaintext PIN to a
     // hash, and record the login — all in one transaction.
-    const { db: signedInDb } = await withTransaction(
+    await withTransaction(
       (txDb) => {
         txDb.users = txDb.users.map((u) => {
           if (u.id !== targetUser.id) return u;
@@ -481,7 +484,8 @@ export async function POST(request: Request) {
         txDb.sessionAuditLogs = [auditEntry, ...txDb.sessionAuditLogs.slice(0, 29)];
       },
       undefined,
-      resolvedTenant.id
+      resolvedTenant.id,
+      { readBack: false }
     );
 
     cookieStore.set(
@@ -496,7 +500,7 @@ export async function POST(request: Request) {
       tenant: resolvedTenant,
       decodedJwt: fullPayload,
       activeSession: newSession,
-      sessionAuditLogs: signedInDb.sessionAuditLogs,
+      sessionAuditLogs: [auditEntry, ...db.sessionAuditLogs].slice(0, 30),
     });
   } catch (err) {
     const dataLayer = mapDataLayerError(err);

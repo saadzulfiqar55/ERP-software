@@ -325,6 +325,8 @@ function mergeWithTenantDefaults(
 // ---------------------------------------------------------------------------
 
 async function ensureFlagshipTenant(sql: Awaited<ReturnType<typeof getReadySql>>) {
+  // Cheap check first: after the first boot this is a single indexed lookup.
+  if (await findTenantRow(sql, DEFAULT_TENANT_ID)) return;
   await sql.begin(async (tx) => {
     await lockTenant(tx, DEFAULT_TENANT_ID);
     const existing = await findTenantRow(tx, DEFAULT_TENANT_ID);
@@ -361,9 +363,10 @@ export async function findTenantStrict(
 async function loadMergedState(
   q: Queryable,
   tenantId: string,
-  mode: "read" | "write" = "read"
+  mode: "read" | "write" = "read",
+  only?: Array<keyof DatabaseSchema>
 ): Promise<DatabaseSchema> {
-  const stored = await loadTenantState(q, tenantId, mode);
+  const stored = await loadTenantState(q, tenantId, mode, only);
   if (!stored) throw new TenantNotFoundError(tenantId);
   return mergeWithTenantDefaults(stored.tenant, stored, getEnvDatabaseConfig());
 }
@@ -372,6 +375,15 @@ async function loadMergedState(
  * Read-only snapshot of a tenant (no lock). Use only for responses; never write it back.
  * Throws TenantNotFoundError for an unknown tenant instead of falling back to another one.
  */
+/**
+ * Tenant row, users and recent session log only — what sign-in, session checks, refresh
+ * and logout need. Much cheaper than readDbAsync; other collections come back empty.
+ */
+export async function readTenantAuthView(tenantId: string): Promise<DatabaseSchema> {
+  const sql = await getDb();
+  return loadMergedState(sql, tenantId, "read", ["users", "sessionAuditLogs"]);
+}
+
 export async function readDbAsync(
   tenantId: string = DEFAULT_TENANT_ID
 ): Promise<DatabaseSchema> {
@@ -420,12 +432,15 @@ export interface TransactionContext {
  */
 export async function runTenantTransaction<T>(
   tenantId: string,
-  work: (txDb: DatabaseSchema, ctx: TransactionContext) => Promise<T> | T
+  work: (txDb: DatabaseSchema, ctx: TransactionContext) => Promise<T> | T,
+  options: { readBack?: boolean } = {}
 ): Promise<{ result: T; db: DatabaseSchema }> {
   const sql = await getDb();
-  const tenant = await findTenantRow(sql, tenantId);
-  if (!tenant) throw new TenantNotFoundError(tenantId);
+  // Callers pass a canonical tenant id (from the session JWT or a tenant record), so no
+  // lookup is needed first: the load inside the transaction reports a missing tenant.
+  const tenant = { id: tenantId };
 
+  let committedDraft: DatabaseSchema | null = null;
   const result = await sql.begin(async (tx) => {
     await lockTenant(tx, tenant.id);
     const before = await loadMergedState(tx, tenant.id, "write");
@@ -453,9 +468,16 @@ export async function runTenantTransaction<T>(
       throw new Error("A transaction may not change the tenant id.");
     }
     await saveTenantDiff(tx, before, draft);
+    committedDraft = draft;
     return workResult;
   });
 
+  // readBack: false skips the extra read for callers that only need the tenant/user
+  // records they changed (sign-in, logout, billing). Journals in that draft hold only
+  // the rows added by this transaction.
+  if (options.readBack === false && committedDraft) {
+    return { result: result as T, db: committedDraft };
+  }
   const committed = await loadMergedState(sql, tenant.id, "read");
   return { result: result as T, db: committed };
 }
@@ -471,18 +493,15 @@ export async function findUserAcrossTenantsAsync(params: {
 }): Promise<{ tenant: TenantOrganization; user: UserProfile; db: DatabaseSchema } | null> {
   const sql = await getDb();
 
-  let scopedTenantId: string | undefined;
-  if (params.tenantSlug) {
-    const scoped = await findTenantRow(sql, params.tenantSlug);
-    if (!scoped) return null;
-    scopedTenantId = scoped.id;
-  }
+  const scope = params.tenantSlug?.trim().toLowerCase() || undefined;
+  const scopeIsFlagship =
+    !scope || scope === DEFAULT_TENANT_ID || scope === DEFAULT_TENANT_SLUG;
 
   const identifier = params.identifier?.trim().toLowerCase();
   const envAdminUsername = process.env.ADMIN_USERNAME?.trim().toLowerCase();
 
   const candidateIds = await findTenantIdsForUser(sql, {
-    tenantId: scopedTenantId,
+    tenantIdOrSlug: scope,
     userId: params.userId,
     identifier,
   });
@@ -491,14 +510,15 @@ export async function findUserAcrossTenantsAsync(params: {
     identifier &&
     envAdminUsername &&
     identifier === envAdminUsername &&
-    (!scopedTenantId || scopedTenantId === DEFAULT_TENANT_ID) &&
+    scopeIsFlagship &&
     !candidateIds.includes(DEFAULT_TENANT_ID)
   ) {
     candidateIds.push(DEFAULT_TENANT_ID);
   }
 
   for (const tenantId of candidateIds) {
-    const db = await loadMergedState(sql, tenantId);
+    // Only the tenant row and its users are needed to authenticate.
+    const db = await loadMergedState(sql, tenantId, "read", ["users", "sessionAuditLogs"]);
     let found: UserProfile | undefined;
     if (params.userId) {
       found = db.users.find((u) => u.id === params.userId);
