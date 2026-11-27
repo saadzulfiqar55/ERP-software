@@ -25,7 +25,8 @@ export type PostgresSyncSection =
   | "AUDIT_LOGS"
   | "IMMUTABLE_AUDIT_LOGS"
   | "CASHIER_SHIFTS"
-  | "FISCAL_PERIODS";
+  | "FISCAL_PERIODS"
+  | "PURCHASING";
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export type Queryable = postgres.ISql<{}>;
@@ -411,6 +412,41 @@ const SCHEMA_DDL = [
   `CREATE OR REPLACE TRIGGER trg_sl_ledger_append_only
      BEFORE UPDATE OR DELETE ON stacklyra_ledger_entries
      FOR EACH ROW EXECUTE FUNCTION stacklyra_ledger_append_only()`,
+  // ---- v3: purchasing ---------------------------------------------------------------------
+  `CREATE TABLE IF NOT EXISTS stacklyra_purchase_orders (
+    tenant_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    po_number TEXT NOT NULL,
+    supplier_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    PRIMARY KEY (tenant_id, id)
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_sl_po_number ON stacklyra_purchase_orders (tenant_id, po_number)`,
+  `CREATE INDEX IF NOT EXISTS ix_sl_po_status ON stacklyra_purchase_orders (tenant_id, status, created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS stacklyra_goods_receipts (
+    tenant_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    grn_number TEXT NOT NULL,
+    po_id TEXT NOT NULL,
+    supplier_id TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    total_minor BIGINT NOT NULL,
+    payload JSONB NOT NULL,
+    PRIMARY KEY (tenant_id, id)
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_sl_grn_number ON stacklyra_goods_receipts (tenant_id, grn_number)`,
+  `CREATE INDEX IF NOT EXISTS ix_sl_grn_received ON stacklyra_goods_receipts (tenant_id, received_at DESC, id DESC)`,
+  `CREATE OR REPLACE FUNCTION stacklyra_grn_append_only() RETURNS trigger AS $fn$
+   BEGIN
+     RAISE EXCEPTION 'Goods receipts cannot be edited or deleted; record a return instead.'
+       USING ERRCODE = 'SL001';
+   END
+   $fn$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE TRIGGER trg_sl_grn_append_only
+     BEFORE UPDATE OR DELETE ON stacklyra_goods_receipts
+     FOR EACH ROW EXECUTE FUNCTION stacklyra_grn_append_only()`,
   // Back-fill ledger amount columns (allowed by the trigger while the columns are still NULL).
   `UPDATE stacklyra_ledger_entries SET
      debit_minor = COALESCE((payload->>'debitMinor')::numeric, round(COALESCE((payload->>'debit')::numeric, 0) * 100))::bigint,
@@ -423,7 +459,7 @@ const SCHEMA_DDL = [
  * Bump when SCHEMA_DDL changes. A cold start only reads this number (one query); the DDL,
  * one-time repairs and back-fills run once per version, not on every server instance.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 async function readSchemaVersion(q: Queryable): Promise<number> {
   try {
@@ -699,6 +735,36 @@ const COLLECTIONS: CollectionSpec[] = [
     columns: [{ name: "timestamp", cast: "text", value: (d) => str(d.timestamp) }],
   },
   {
+    field: "purchaseOrders",
+    table: "stacklyra_purchase_orders",
+    idColumn: "id",
+    idOf: (d) => str(d.id),
+    hasPayload: true,
+    orderBy: "created_at DESC",
+    columns: [
+      { name: "po_number", cast: "text", value: (d) => str(d.poNumber) },
+      { name: "supplier_id", cast: "text", value: (d) => str(d.supplierId) },
+      { name: "status", cast: "text", value: (d) => str(d.status) },
+      { name: "created_at", cast: "text", value: (d) => str(d.createdAt) },
+    ],
+  },
+  {
+    field: "goodsReceipts",
+    table: "stacklyra_goods_receipts",
+    idColumn: "id",
+    idOf: (d) => str(d.id),
+    hasPayload: true,
+    orderBy: "received_at DESC",
+    journal: { recent: 50 },
+    columns: [
+      { name: "grn_number", cast: "text", value: (d) => str(d.grnNumber) },
+      { name: "po_id", cast: "text", value: (d) => str(d.poId) },
+      { name: "supplier_id", cast: "text", value: (d) => str(d.supplierId) },
+      { name: "received_at", cast: "text", value: (d) => str(d.receivedAt) },
+      { name: "total_minor", cast: "bigint", value: (d) => Math.round(Number(d.totalMinor) || 0) },
+    ],
+  },
+  {
     field: "sessionAuditLogs",
     table: "stacklyra_session_audit_logs",
     idColumn: "id",
@@ -710,7 +776,12 @@ const COLLECTIONS: CollectionSpec[] = [
   },
 ];
 
-export type JournalField = "orders" | "ledger" | "immutableAuditLogs" | "sessionAuditLogs";
+export type JournalField =
+  | "orders"
+  | "ledger"
+  | "immutableAuditLogs"
+  | "sessionAuditLogs"
+  | "goodsReceipts";
 
 // Tenant-row fields stored as JSONB columns on stacklyra_tenants.
 const TENANT_JSON_FIELDS: Array<[keyof DatabaseSchema, string]> = [

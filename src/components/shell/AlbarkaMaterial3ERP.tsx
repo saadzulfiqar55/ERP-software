@@ -34,6 +34,7 @@ import {
   Store,
   Trash2,
   Truck,
+  Upload,
   Users,
   X,
 } from "lucide-react";
@@ -72,6 +73,7 @@ import {
   Avatar,
   Button,
   Card,
+  Dialog,
   CompactField,
   CompactSelect,
   EmptyState,
@@ -97,6 +99,32 @@ import type { TenantSummary } from "@/lib/postgres";
 import DishVisual from "@/components/DishVisual";
 import { WorkspaceSplash } from "@/components/shell/WorkspaceSplash";
 import { StackLyraLogo } from "@/components/ui/StackLyraLogo";
+import {
+  BulkImportDialog,
+  type BulkImportResult,
+} from "@/components/inventory/BulkImportDialog";
+import { guessStation } from "@/modules/inventory/bulk-import";
+import { GettingStarted } from "@/components/dashboard/GettingStarted";
+import { PurchasingView } from "@/components/purchasing/PurchasingView";
+
+const KITCHEN_STATION_LABELS: Record<string, string> = {
+  KARAHI_HANDI: "Karahi & Handi",
+  BBQ_GRILL: "BBQ & Grill",
+  TANDOOR: "Tandoor",
+  RICE_PULAO: "Rice & Pulao",
+  SWEET_RETAIL: "Sweets / Retail",
+  BEVERAGES: "Beverages",
+};
+
+function formatPriceRange(variants: { price: number }[]): string {
+  if (variants.length === 0) return "—";
+  const prices = variants.map((v) => v.price);
+  const lo = Math.min(...prices);
+  const hi = Math.max(...prices);
+  return lo === hi
+    ? `PKR ${lo.toLocaleString()}`
+    : `PKR ${lo.toLocaleString()} – ${hi.toLocaleString()}`;
+}
 import { ERP_VERSION_TAG } from "@/lib/version";
 import {
   clearDurableSnapshot,
@@ -216,6 +244,15 @@ export function AlbarkaMaterial3ERP({
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [waitingTasks, setWaitingTasks] = useState<WaitingTaskItem[]>([]);
   const [stockMonitor, setStockMonitor] = useState<StockLevelMonitorItem[]>([]);
+  const [importKind, setImportKind] = useState<null | "products" | "stock">(null);
+  const [newPurchaseOrderSignal, setNewPurchaseOrderSignal] = useState(0);
+  const [openPurchaseOrders, setOpenPurchaseOrders] = useState<number | undefined>(undefined);
+  const [pendingConfirm, setPendingConfirm] = useState<null | {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  }>(null);
   const [restaurantTables, setRestaurantTables] = useState<string[]>([]);
   const [servers, setServers] = useState<string[]>([]);
   const [immutableAuditLogs, setImmutableAuditLogs] = useState<
@@ -1470,30 +1507,27 @@ export function AlbarkaMaterial3ERP({
     if (editingProductId) {
       const existing = products.find((p) => p.id === editingProductId);
       if (!existing) return;
+      // The form only edits name, code, category, first-size price and photo. Everything else
+      // (segment, tax mode, stock on hand, other sizes, recorded costs) is kept as it was.
+      const priceChanged = Number(newProdPrice) !== existing.variants[0]?.price;
       const updatedProduct: Product = {
         ...existing,
         code: newProdCode.trim() || existing.code,
         name: newProdName.trim(),
-        segment: "RESTAURANT",
         category: newProdCategory,
-        kitchenStation: newProdCategory.includes("BBQ")
-          ? "BBQ_GRILL"
-          : newProdCategory.includes("Tandoor")
-          ? "TANDOOR"
-          : newProdCategory.includes("Rice")
-          ? "RICE_PULAO"
-          : "KARAHI_HANDI",
-        taxMode: "EXCLUSIVE",
-        stockQty: 0,
+        kitchenStation:
+          newProdCategory === existing.category
+            ? existing.kitchenStation
+            : guessStation(newProdCategory, existing.segment),
         imageUrl: newProdImageUrl.trim() || undefined,
         variants:
           existing.variants.length > 0
             ? existing.variants.map((v, idx) =>
-                idx === 0
+                idx === 0 && priceChanged
                   ? {
                       ...v,
                       price: Number(newProdPrice),
-                      costPrice: Math.round(Number(newProdPrice) * 0.6),
+                      costPrice: v.costPrice || Math.round(Number(newProdPrice) * 0.6),
                     }
                   : v
               )
@@ -1533,13 +1567,7 @@ export function AlbarkaMaterial3ERP({
       nameUrdu: "",
       segment: "RESTAURANT",
       category: newProdCategory,
-      kitchenStation: newProdCategory.includes("BBQ")
-        ? "BBQ_GRILL"
-        : newProdCategory.includes("Tandoor")
-        ? "TANDOOR"
-        : newProdCategory.includes("Rice")
-        ? "RICE_PULAO"
-        : "KARAHI_HANDI",
+      kitchenStation: guessStation(newProdCategory, "RESTAURANT"),
       taxMode: "EXCLUSIVE",
       stockQty: 0,
       unit: "Portion",
@@ -1570,6 +1598,22 @@ export function AlbarkaMaterial3ERP({
       saveWorkspaceCache({ products: prevProducts });
       notifySaved(res.error || "Failed to add menu item.");
     }
+  }
+
+  function handleBulkImported(result: BulkImportResult) {
+    if (result.products) {
+      setProducts(result.products);
+      saveWorkspaceCache({ products: result.products });
+    }
+    if (result.stockMonitor) {
+      setStockMonitor(result.stockMonitor);
+      saveWorkspaceCache({ stockMonitor: result.stockMonitor });
+    }
+    notifySaved(
+      `Import finished: ${result.created} added, ${result.updated} updated${
+        result.skipped ? `, ${result.skipped} skipped` : ""
+      }.`
+    );
   }
 
   function startEditingProduct(product: Product) {
@@ -1998,6 +2042,10 @@ export function AlbarkaMaterial3ERP({
     currentUser.role,
     "invoices:delete"
   );
+  const canManagePurchasing = hasGranularPermission(
+    currentUser.role,
+    "purchasing:manage"
+  );
   const canManageUsers = hasGranularPermission(
     currentUser.role,
     "users:manage"
@@ -2053,7 +2101,7 @@ export function AlbarkaMaterial3ERP({
       case "sales":
         return totalOrderCount;
       case "purchasing":
-        return supplierCount;
+        return openPurchaseOrders || undefined;
       case "inventory":
         return products.length;
       case "invoices":
@@ -2433,11 +2481,12 @@ export function AlbarkaMaterial3ERP({
                 >
                   New sales order (POS)
                 </button>
-                {canViewLedger && (
+                {canManagePurchasing && (
                   <button
                     type="button"
                     onClick={() => {
                       setActiveNav("purchasing");
+                      setNewPurchaseOrderSignal((n) => n + 1);
                       setCreateMenuOpen(false);
                     }}
                     className="w-full px-4 py-2.5 text-left hover:bg-md-surface-container-low text-md-on-surface"
@@ -2594,8 +2643,8 @@ export function AlbarkaMaterial3ERP({
       {/* =================================================================== */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
-        <header className="sticky top-0 z-20 bg-md-surface/95 px-4 sm:px-8 py-3 flex items-center justify-between gap-4 border-b border-md-divider">
-          <div className="flex items-center gap-3 flex-1 max-w-2xl">
+        <header className="sticky top-0 z-20 bg-md-surface/85 backdrop-blur-md supports-[backdrop-filter]:bg-md-surface/75 px-3 sm:px-8 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-4 border-b border-md-divider">
+          <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 max-w-2xl">
             <Button
               variant="icon"
               aria-label="Open navigation menu"
@@ -2643,11 +2692,12 @@ export function AlbarkaMaterial3ERP({
               variant="icon"
               aria-label="About StackLyra ERP and shortcuts"
               onClick={() => setActiveNav("about")}
+              className="max-sm:hidden!"
             >
               <HelpCircle className="w-5 h-5" strokeWidth={1.8} />
             </Button>
 
-            <div className="relative">
+            <div className="relative hidden sm:block">
               <Button
                 variant="icon"
                 aria-label="Notifications"
@@ -2672,7 +2722,7 @@ export function AlbarkaMaterial3ERP({
             </button>
 
             {avatarMenuOpen && (
-              <div className="absolute right-0 top-14 z-40 w-60 rounded-2xl bg-md-surface-container-lowest border border-md-outline-variant shadow-lg py-2 text-sm">
+              <div className="absolute right-0 top-14 z-40 w-64 rounded-2xl bg-md-surface-container-lowest shadow-(--md-elevation-3) py-2 text-sm md-anim-dialog origin-top-right">
                 <div className="px-4 py-2.5 border-b border-md-divider">
                   <div className="font-medium text-md-on-surface">
                     {currentUser.name}
@@ -2723,6 +2773,7 @@ export function AlbarkaMaterial3ERP({
 
         {/* Page Container (32px desktop / 16px mobile padding) */}
         <main className="p-4 sm:p-8 flex-1 max-w-[1600px] w-full mx-auto">
+          <div key={activeNav} className="md-anim-rise">
           {/* =============================================================== */}
           {/* PAGE 5.1: DASHBOARD                                             */}
           {/* =============================================================== */}
@@ -2740,6 +2791,70 @@ export function AlbarkaMaterial3ERP({
               onReorderStock={handleReorderStock}
               onNavigate={(target) => setActiveNav(target as ERPNavKey)}
               onSelectOrderReceipt={(ord) => setActiveReceiptOrder(ord)}
+              banner={
+                canManageInventory || canManageUsers ? (
+                  <GettingStarted
+                    workspaceId={activeTenantId || "default"}
+                    steps={[
+                      {
+                        id: "catalog",
+                        title: tenant?.segment === "RETAIL" ? "Add your products" : "Add your menu",
+                        description:
+                          "Type items in one by one, or import a whole price list from Excel in a minute.",
+                        done: products.length > 0,
+                        actionLabel: "Import from spreadsheet",
+                        onAction: () => {
+                          setInventoryTab("MENU");
+                          setActiveNav("inventory");
+                          setImportKind("products");
+                        },
+                      },
+                      {
+                        id: "tax",
+                        title: "Check your tax rates",
+                        description: `Cash ${praConfig.cashTaxRate}% · Card ${praConfig.cardTaxRate}%. Make sure these match your registration.`,
+                        done: Boolean(praConfig.ntn),
+                        actionLabel: "Open tax settings",
+                        onAction: () => {
+                          setActiveNav("settings");
+                          setSettingsSubTab("TAX_RULES");
+                        },
+                      },
+                      ...(tenant?.segment === "RETAIL"
+                        ? []
+                        : [
+                            {
+                              id: "tables",
+                              title: "Add tables and waiters",
+                              description: "So dine-in orders can be assigned to a table and server.",
+                              done: restaurantTables.length > 0,
+                              actionLabel: "Set up floor",
+                              onAction: () => {
+                                setActiveNav("settings");
+                                setSettingsSubTab("RESTAURANT_PROFILES");
+                              },
+                            },
+                          ]),
+                      {
+                        id: "staff",
+                        title: "Invite your staff",
+                        description: "Give cashiers a PIN so every sale is tracked to a person.",
+                        done: users.length > 1,
+                        actionLabel: "Add staff",
+                        onAction: () => setActiveNav("hr"),
+                      },
+                      {
+                        id: "sale",
+                        title: "Make your first sale",
+                        description: "Ring up a test order on the POS screen and print the receipt.",
+                        done: (summary?.orders.count ?? orders.length) > 0,
+                        actionLabel: "Open POS",
+                        onAction: () => setActiveNav("pos"),
+                      },
+                    ]}
+                  />
+                ) : undefined
+              }
             />
           )}
 
@@ -2832,15 +2947,28 @@ export function AlbarkaMaterial3ERP({
                         }
                       />
                       {products.length === 0 && canManageInventory && (
-                        <Button
-                          variant="filled"
-                          onClick={() => {
-                            setInventoryTab("MENU");
-                            setActiveNav("inventory");
-                          }}
-                        >
-                          Add menu dishes
-                        </Button>
+                        <div className="flex flex-wrap justify-center gap-2">
+                          <Button
+                            variant="filled"
+                            onClick={() => {
+                              setInventoryTab("MENU");
+                              setActiveNav("inventory");
+                            }}
+                          >
+                            Add menu dishes
+                          </Button>
+                          <Button
+                            variant="tonal"
+                            icon={<Upload className="w-4 h-4" />}
+                            onClick={() => {
+                              setInventoryTab("MENU");
+                              setActiveNav("inventory");
+                              setImportKind("products");
+                            }}
+                          >
+                            Import from spreadsheet
+                          </Button>
+                        </div>
                       )}
                     </Card>
                   ) : (
@@ -3272,7 +3400,7 @@ export function AlbarkaMaterial3ERP({
                   </div>
                 ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
+                  <table className="md-table w-full text-left text-sm">
                     <thead>
                       <tr className="border-b border-md-divider bg-md-surface-container-low/60 text-xs font-medium text-md-on-surface-variant">
                         <th className="py-3.5 px-4">Order #</th>
@@ -3348,24 +3476,37 @@ export function AlbarkaMaterial3ERP({
                     : "Track raw materials, ingredients, supplies, and reorder thresholds"
                 }
                 actions={
-                  <SegmentedButton
-                    value={inventoryTab}
-                    onChange={(tab) => setInventoryTab(tab)}
-                    options={[
-                      { value: "MENU", label: `Menu (${products.length})` },
-                      {
-                        value: "STOCK",
-                        label: `Material Stock (${stockMonitor.length})`,
-                      },
-                    ]}
-                  />
+                  <>
+                    <SegmentedButton
+                      value={inventoryTab}
+                      onChange={(tab) => setInventoryTab(tab)}
+                      options={[
+                        { value: "MENU", label: `Menu (${products.length})` },
+                        {
+                          value: "STOCK",
+                          label: `Material Stock (${stockMonitor.length})`,
+                        },
+                      ]}
+                    />
+                    {canManageInventory && (
+                      <Button
+                        variant="tonal"
+                        icon={<Upload className="w-4 h-4" />}
+                        onClick={() =>
+                          setImportKind(inventoryTab === "MENU" ? "products" : "stock")
+                        }
+                      >
+                        {inventoryTab === "MENU" ? "Import items" : "Import stock"}
+                      </Button>
+                    )}
+                  </>
                 }
               />
 
               {inventoryTab === "MENU" ? (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                   {canManageInventory && (
-                    <Card className="lg:col-span-4 space-y-4 h-fit">
+                    <Card className="xl:col-span-4 space-y-4 h-fit">
                       <div className="flex items-center justify-between">
                         <h2 className="text-base font-semibold text-md-on-surface">
                           {editingProductId
@@ -3443,19 +3584,34 @@ export function AlbarkaMaterial3ERP({
 
                   <Card
                     className={`${
-                      canManageInventory ? "lg:col-span-8" : "lg:col-span-12"
+                      canManageInventory ? "xl:col-span-8" : "xl:col-span-12"
                     } p-0! overflow-hidden`}
                   >
                     {products.length === 0 ? (
                       <div className="p-6">
                         <EmptyState
+                          icon={<Package className="w-6 h-6" />}
                           title="No menu items yet"
-                          subtitle="Add your restaurant dishes on the left to make them available in POS Terminal."
+                          subtitle={
+                            canManageInventory
+                              ? "Add dishes one at a time with the form, or bring in your whole menu from a spreadsheet in one go."
+                              : "Ask a manager to add menu items. They will show up here and on the POS screen."
+                          }
+                          action={
+                            canManageInventory ? (
+                              <Button
+                                icon={<Upload className="w-4 h-4" />}
+                                onClick={() => setImportKind("products")}
+                              >
+                                Import from spreadsheet
+                              </Button>
+                            ) : undefined
+                          }
                         />
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
+                        <table className="md-table w-full text-left text-sm">
                           <thead>
                             <tr className="border-b border-md-divider bg-md-surface-container-low/60 text-xs font-medium text-md-on-surface-variant">
                               <th className="py-3.5 px-4">Photo</th>
@@ -3498,12 +3654,17 @@ export function AlbarkaMaterial3ERP({
                                 </td>
                                 <td className="py-3 px-3">
                                   <StatusChip
-                                    label={p.kitchenStation}
+                                    label={KITCHEN_STATION_LABELS[p.kitchenStation] || p.kitchenStation}
                                     variant="primary"
                                   />
                                 </td>
-                                <td className="py-3 px-3 font-mono text-xs tabular-nums">
-                                  PKR {p.variants[0]?.price.toLocaleString()}
+                                <td className="py-3 px-3 font-mono text-xs tabular-nums whitespace-nowrap">
+                                  {formatPriceRange(p.variants)}
+                                  {p.variants.length > 1 && (
+                                    <div className="font-sans text-[11px] text-md-on-surface-variant">
+                                      {p.variants.length} sizes
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="py-3 px-4 text-right">
                                   <div className="inline-flex items-center gap-1">
@@ -3522,7 +3683,13 @@ export function AlbarkaMaterial3ERP({
                                         variant="icon"
                                         aria-label="Archive item"
                                         onClick={() =>
-                                          handleDeleteProduct(p.id, p.name)
+                                          setPendingConfirm({
+                                            title: `Remove "${p.name}"?`,
+                                            message:
+                                              "It disappears from the menu and the POS screen. Past sales and invoices keep it, and the change is recorded in the audit log.",
+                                            confirmLabel: "Remove item",
+                                            onConfirm: () => void handleDeleteProduct(p.id, p.name),
+                                          })
                                         }
                                         className="w-9! h-9!"
                                       >
@@ -3545,9 +3712,9 @@ export function AlbarkaMaterial3ERP({
                   </Card>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                   {canManageInventory && (
-                    <Card className="lg:col-span-4 space-y-4 h-fit">
+                    <Card className="xl:col-span-4 space-y-4 h-fit">
                       <div className="flex items-center justify-between">
                         <h2 className="text-base font-semibold text-md-on-surface">
                           {editingStockId ? "Edit material stock" : "Add raw material"}
@@ -3618,19 +3785,34 @@ export function AlbarkaMaterial3ERP({
 
                   <Card
                     className={`${
-                      canManageInventory ? "lg:col-span-8" : "lg:col-span-12"
+                      canManageInventory ? "xl:col-span-8" : "xl:col-span-12"
                     } p-0! overflow-hidden`}
                   >
                     {stockMonitor.length === 0 ? (
                       <div className="p-6">
                         <EmptyState
+                          icon={<Package className="w-6 h-6" />}
                           title="No material stock entries yet"
-                          subtitle="Add raw kitchen ingredients or supply items on the left to track inventory."
+                          subtitle={
+                            canManageInventory
+                              ? "Track ingredients and supplies so you know when to reorder. Add them with the form, or import a stock list."
+                              : "Ask a manager to add raw materials and supplies to track."
+                          }
+                          action={
+                            canManageInventory ? (
+                              <Button
+                                icon={<Upload className="w-4 h-4" />}
+                                onClick={() => setImportKind("stock")}
+                              >
+                                Import stock list
+                              </Button>
+                            ) : undefined
+                          }
                         />
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
+                        <table className="md-table w-full text-left text-sm">
                           <thead>
                             <tr className="border-b border-md-divider bg-md-surface-container-low/60 text-xs font-medium text-md-on-surface-variant">
                               <th className="py-3.5 px-4">SKU</th>
@@ -3718,10 +3900,14 @@ export function AlbarkaMaterial3ERP({
                                           variant="icon"
                                           aria-label="Remove material"
                                           onClick={() =>
-                                            void handleDeleteStockItem(
-                                              stk.id,
-                                              stk.name
-                                            )
+                                            setPendingConfirm({
+                                              title: `Remove "${stk.name}"?`,
+                                              message:
+                                                "It stops being tracked in material stock. The removal is recorded in the audit log.",
+                                              confirmLabel: "Remove material",
+                                              onConfirm: () =>
+                                                void handleDeleteStockItem(stk.id, stk.name),
+                                            })
                                           }
                                           className="w-9! h-9!"
                                         >
@@ -3762,7 +3948,18 @@ export function AlbarkaMaterial3ERP({
           {/* =============================================================== */}
           {/* ACCOUNTING & DOUBLE-ENTRY KHATA LEDGER (SUPER ADMIN ONLY)       */}
           {/* =============================================================== */}
-          {(activeNav === "accounting" || activeNav === "purchasing") &&
+          {activeNav === "purchasing" && (
+            <PurchasingView
+              businessName={tenant?.name || praConfig.restaurantName || "Our business"}
+              newOrderSignal={newPurchaseOrderSignal}
+              onShowSnackbar={notifySaved}
+              onStockChanged={() => void fetchScopedState()}
+              onOpenOrdersCount={setOpenPurchaseOrders}
+              onOpenSupplierLedger={canViewLedger ? () => setActiveNav("accounting") : undefined}
+            />
+          )}
+
+          {activeNav === "accounting" &&
             (!canViewLedger ? (
               <Card>
                 <EmptyState
@@ -3773,11 +3970,7 @@ export function AlbarkaMaterial3ERP({
             ) : (
             <div className="space-y-6">
               <PageHeader
-                title={
-                  activeNav === "purchasing"
-                    ? "Purchasing & supplier payables"
-                    : "Accounting & double-entry ledger"
-                }
+                title="Accounting & double-entry ledger"
                 subtitle="Append-only financial journal, customer receivables, supplier payables, and PRA tax calculator"
               />
 
@@ -4022,7 +4215,7 @@ export function AlbarkaMaterial3ERP({
                       </h3>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
+                      <table className="md-table w-full text-left text-sm">
                         <thead>
                           <tr className="border-b border-md-divider bg-md-surface-container-low/60 text-xs font-medium text-md-on-surface-variant">
                             <th className="py-3 px-4">Voucher #</th>
@@ -4532,7 +4725,7 @@ export function AlbarkaMaterial3ERP({
                           />
                         </div>
                         <div className="overflow-x-auto">
-                          <table className="w-full text-left text-sm">
+                          <table className="md-table w-full text-left text-sm">
                             <thead>
                               <tr className="border-b border-md-divider bg-md-surface-container-low/60 text-xs font-medium text-md-on-surface-variant">
                                 <th className="py-3 px-4">Organization</th>
@@ -4799,7 +4992,7 @@ export function AlbarkaMaterial3ERP({
                     </h2>
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
+                    <table className="md-table w-full text-left text-sm">
                       <thead>
                         <tr className="border-b border-md-divider bg-md-surface-container-low/60 text-xs font-medium text-md-on-surface-variant">
                           <th className="py-3 px-4">Time</th>
@@ -4857,7 +5050,45 @@ export function AlbarkaMaterial3ERP({
           {/* ABOUT, VERSIONING & CREATOR SOCIALS                             */}
           {/* =============================================================== */}
           {activeNav === "about" && <AboutView />}
+          </div>
         </main>
+
+        <Dialog
+          open={pendingConfirm !== null}
+          onClose={() => setPendingConfirm(null)}
+          size="sm"
+          icon={<Trash2 className="w-5 h-5" />}
+          title={pendingConfirm?.title || ""}
+          description={pendingConfirm?.message}
+          footer={
+            <>
+              <Button variant="text" onClick={() => setPendingConfirm(null)}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-md-error! text-md-surface!"
+                onClick={() => {
+                  pendingConfirm?.onConfirm();
+                  setPendingConfirm(null);
+                }}
+              >
+                {pendingConfirm?.confirmLabel || "Confirm"}
+              </Button>
+            </>
+          }
+        />
+
+        {canManageInventory && (
+          <BulkImportDialog
+            open={importKind !== null}
+            kind={importKind || "products"}
+            onClose={() => setImportKind(null)}
+            defaultSegment={tenant?.segment === "RETAIL" ? "RETAIL" : "RESTAURANT"}
+            existingProducts={products}
+            existingStock={stockMonitor}
+            onImported={handleBulkImported}
+          />
+        )}
       </div>
 
       {/* Command Palette (Ctrl + K) */}

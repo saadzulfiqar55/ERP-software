@@ -94,9 +94,9 @@ export default function ReceiptModal({ order, praConfig, onClose }: ReceiptModal
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-md-on-surface/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-(--md-scrim) backdrop-blur-[2px] p-4 md-anim-fade"
     >
-      <div className="bg-md-surface-container-lowest border border-md-outline-variant rounded-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+      <div className="bg-md-surface-container-lowest rounded-[28px] shadow-(--md-elevation-3) max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden md-anim-dialog">
         {/* Top Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 bg-md-surface-container-low border-b border-md-divider">
           <div className="flex items-center gap-3">

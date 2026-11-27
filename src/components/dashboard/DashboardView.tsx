@@ -52,6 +52,8 @@ interface DashboardViewProps {
   onReorderStock: (item: StockLevelMonitorItem) => void;
   onNavigate: (section: string) => void;
   onSelectOrderReceipt?: (order: Order) => void;
+  /** Optional content shown under the page title (e.g. the setup checklist) */
+  banner?: React.ReactNode;
 }
 
 export default function DashboardView({
@@ -67,6 +69,7 @@ export default function DashboardView({
   onReorderStock,
   onNavigate,
   onSelectOrderReceipt,
+  banner,
 }: DashboardViewProps) {
   const [range, setRange] = useState<"today" | "week" | "month" | "quarter">(
     "month"
@@ -234,6 +237,8 @@ export default function DashboardView({
           />
         }
       />
+
+      {banner}
 
       {/* 2. KPI Row — 4 Material 3 StatCards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">

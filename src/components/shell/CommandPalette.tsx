@@ -128,12 +128,12 @@ export default function CommandPalette({
       role="dialog"
       aria-modal="true"
       aria-label="Global search command palette"
-      className="fixed inset-0 z-50 flex items-start justify-center bg-md-on-surface/40 pt-20 p-4"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-(--md-scrim) backdrop-blur-[2px] pt-20 p-4 md-anim-fade"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl rounded-2xl bg-md-surface-container-lowest border border-md-outline-variant shadow-xl overflow-hidden"
+        className="w-full max-w-2xl rounded-[28px] bg-md-surface-container-lowest shadow-(--md-elevation-3) overflow-hidden md-anim-dialog"
       >
         {/* Top Search Input */}
         <div className="h-14 px-5 flex items-center gap-3 border-b border-md-divider bg-md-surface-container-low">

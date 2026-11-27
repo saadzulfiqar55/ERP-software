@@ -95,7 +95,9 @@ export type ERPPermission =
   | "accounting:journal:reverse"
   | "accounting:period:close"
   | "settings:pra:manage"
-  | "users:manage";
+  | "users:manage"
+  | "purchasing:manage"
+  | "purchasing:receive";
 
 export interface UserProfile {
   id: string;
@@ -179,7 +181,7 @@ export interface ImmutableAuditLog {
   actorId: string;
   actorName: string;
   actorRole: UserRole;
-  module: "POS" | "INVENTORY" | "ACCOUNTING" | "AUTH" | "SETTINGS" | "SAAS";
+  module: "POS" | "INVENTORY" | "ACCOUNTING" | "AUTH" | "SETTINGS" | "SAAS" | "PURCHASING";
   action: "CREATE" | "UPDATE" | "REVERSE_VOID" | "SOFT_ARCHIVE" | "PERIOD_LOCK";
   entityType: string;
   entityId: string;
@@ -344,6 +346,97 @@ export interface Order {
 }
 
 export type PartyType = "CUSTOMER" | "SUPPLIER" | "EXPENSE_HEAD";
+
+// ---------------------------------------------------------------------------------------------
+// Purchasing: purchase orders (PO) and goods received notes (GRN)
+// ---------------------------------------------------------------------------------------------
+
+export type PurchaseOrderStatus =
+  | "DRAFT"
+  | "ORDERED"
+  | "PARTIALLY_RECEIVED"
+  | "RECEIVED"
+  | "CLOSED"
+  | "CANCELLED";
+
+/** What a purchase line restocks: a material-stock item or a catalog product variant. */
+export type PurchaseItemKind = "MATERIAL" | "PRODUCT";
+
+export interface PurchaseOrderLine {
+  id: string;
+  itemKind: PurchaseItemKind;
+  itemId: string;
+  /** Product lines: the variant whose cost is updated on receipt. */
+  variantId?: string;
+  name: string;
+  unit: string;
+  qtyOrdered: number;
+  qtyReceived: number;
+  /** Agreed cost per unit, integer paisa. */
+  unitCostMinor: number;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  tenantId?: string;
+  branchId?: string;
+  poNumber: string;
+  supplierId: string;
+  supplierName: string;
+  status: PurchaseOrderStatus;
+  lines: PurchaseOrderLine[];
+  /** Sum of qtyOrdered × unitCostMinor. */
+  totalMinor: number;
+  /** Sum of the GRNs posted against this order. */
+  receivedValueMinor: number;
+  expectedDate?: string;
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  orderedAt?: string;
+  completedAt?: string;
+  cancelledAt?: string;
+  cancelReason?: string;
+  grnIds: string[];
+}
+
+export interface GoodsReceiptLine {
+  poLineId: string;
+  itemKind: PurchaseItemKind;
+  itemId: string;
+  variantId?: string;
+  name: string;
+  unit: string;
+  qty: number;
+  unitCostMinor: number;
+  lineTotalMinor: number;
+  /** Stock on hand before and after this receipt, for the audit trail. */
+  stockBefore: number;
+  stockAfter: number;
+}
+
+/** Goods received note. Append-only: a posted GRN is never edited or deleted. */
+export interface GoodsReceipt {
+  id: string;
+  tenantId?: string;
+  branchId?: string;
+  grnNumber: string;
+  poId: string;
+  poNumber: string;
+  supplierId: string;
+  supplierName: string;
+  /** The supplier's own bill / delivery-challan number. */
+  supplierInvoiceRef?: string;
+  receivedAt: string;
+  receivedBy: string;
+  lines: GoodsReceiptLine[];
+  totalMinor: number;
+  notes?: string;
+  /** Supplier khata entry posted for this receipt (absent if the ledger is not enabled). */
+  ledgerEntryId?: string;
+  ledgerVoucherNo?: string;
+}
 
 export interface PartyAccount {
   id: string;

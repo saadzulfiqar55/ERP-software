@@ -56,6 +56,12 @@ export interface StockLevelMonitorItem {
   currentQty: number;
   reorderTarget: number;
   unit: string;
+  /** Moving-average purchase cost per unit (paisa), maintained by goods receipts. */
+  avgUnitCostMinor?: number;
+  /** Cost per unit on the most recent goods receipt (paisa). */
+  lastUnitCostMinor?: number;
+  /** Supplier of the most recent goods receipt. */
+  lastSupplierId?: string;
 }
 
 const MONTH_LABELS = [

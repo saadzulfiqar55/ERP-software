@@ -68,6 +68,8 @@ export function buildScopedStateResponse(
       documentCounters: [],
       cashierShifts: [],
       fiscalPeriods: [],
+      purchaseOrders: [],
+      goodsReceipts: [],
       waitingTasks: [],
       stockMonitor: [],
       restaurantTables: [],

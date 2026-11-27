@@ -42,7 +42,7 @@ export async function withTransaction<T>(
  */
 export function nextSequentialNumber(
   txDb: DatabaseSchema,
-  docType: "INVOICE" | "USIN" | "VOUCHER" | "REVERSAL",
+  docType: "INVOICE" | "USIN" | "VOUCHER" | "REVERSAL" | "PURCHASE_ORDER" | "GRN",
   prefix?: string,
   year: number = new Date().getFullYear()
 ): string {

@@ -27,12 +27,16 @@ export const ROLE_PERMISSION_MATRIX: Record<UserRole, ERPPermission[]> = {
     "accounting:period:close",
     "settings:pra:manage",
     "users:manage",
+    "purchasing:manage",
+    "purchasing:receive",
   ],
   MANAGER: [
     "pos:sale:create",
     "pos:discount:override",
     "inventory:view",
     "inventory:adjust",
+    "purchasing:manage",
+    "purchasing:receive",
   ],
   CASHIER: ["pos:sale:create", "inventory:view"],
 };

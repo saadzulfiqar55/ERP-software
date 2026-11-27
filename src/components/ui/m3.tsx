@@ -39,3 +39,4 @@ export {
   CompactSelect,
   type M3SelectOption,
 } from "./Select";
+export { Dialog } from "./Dialog";

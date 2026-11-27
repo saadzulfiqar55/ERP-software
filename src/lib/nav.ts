@@ -70,7 +70,7 @@ export const ERP_NAVIGATION_ITEMS: NavItemConfig[] = [
     label: "Purchasing",
     href: "/purchasing",
     iconName: "Truck",
-    permission: "accounting:ledger:view",
+    permission: "purchasing:manage",
     section: "PRIMARY",
   },
   {

@@ -47,6 +47,7 @@ import {
   CashierShift,
   DocumentCounter,
   FiscalPeriod,
+  GoodsReceipt,
   IdempotencyRecord,
   ImmutableAuditLog,
   LedgerEntry,
@@ -55,6 +56,7 @@ import {
   PartyAccount,
   PRAConfig,
   Product,
+  PurchaseOrder,
   SessionAuditLog,
   SubscriptionPlanId,
   TenantOrganization,
@@ -87,6 +89,9 @@ export interface DatabaseSchema {
   documentCounters: DocumentCounter[];
   cashierShifts: CashierShift[];
   fiscalPeriods: FiscalPeriod[];
+  purchaseOrders: PurchaseOrder[];
+  /** Journal: only the newest rows are loaded for reads; empty at the start of a write. */
+  goodsReceipts: GoodsReceipt[];
   waitingTasks?: WaitingTaskItem[];
   stockMonitor?: StockLevelMonitorItem[];
   restaurantTables?: string[];
@@ -195,6 +200,8 @@ export function buildTenantDefaults(
     ],
     cashierShifts: [],
     fiscalPeriods: buildDefaultFiscalPeriods(tenant.id),
+    purchaseOrders: [],
+    goodsReceipts: [],
     waitingTasks: isFlagship ? INITIAL_WAITING_TASKS : [],
     stockMonitor: isFlagship ? INITIAL_STOCK_MONITOR : [],
     restaurantTables: [],
@@ -313,6 +320,8 @@ function mergeWithTenantDefaults(
       parsed.fiscalPeriods && parsed.fiscalPeriods.length > 0
         ? parsed.fiscalPeriods.map((fp) => ({ ...fp, tenantId: tenant.id }))
         : defaults.fiscalPeriods,
+    purchaseOrders: parsed.purchaseOrders ?? [],
+    goodsReceipts: parsed.goodsReceipts ?? [],
     waitingTasks: parsed.waitingTasks ?? defaults.waitingTasks,
     stockMonitor: parsed.stockMonitor ?? defaults.stockMonitor,
     restaurantTables: parsed.restaurantTables ?? defaults.restaurantTables,
@@ -382,6 +391,15 @@ async function loadMergedState(
 export async function readTenantAuthView(tenantId: string): Promise<DatabaseSchema> {
   const sql = await getDb();
   return loadMergedState(sql, tenantId, "read", ["users", "sessionAuditLogs"]);
+}
+
+/** Read-only view with only the listed collections loaded (others come back empty). */
+export async function readTenantSlice(
+  tenantId: string,
+  only: Array<keyof DatabaseSchema>
+): Promise<DatabaseSchema> {
+  const sql = await getDb();
+  return loadMergedState(sql, tenantId, "read", only);
 }
 
 export async function readDbAsync(

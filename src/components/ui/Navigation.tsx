@@ -103,7 +103,7 @@ export function SearchBar({
       onKeyDown={(e) => {
         if (e.key === "Enter" && onOpenPalette) onOpenPalette();
       }}
-      className="h-13 w-full max-w-xl rounded-full bg-md-surface-container-low hover:bg-md-surface-container-high/70 border border-md-outline-variant/60 hover:border-md-outline-variant px-5 flex items-center justify-between gap-3 text-md-on-surface-variant transition-all duration-200"
+      className="h-11 sm:h-13 w-full min-w-0 max-w-xl rounded-full bg-md-surface-container-low hover:bg-md-surface-container-high/70 border border-md-outline-variant/60 hover:border-md-outline-variant px-4 sm:px-5 flex items-center justify-between gap-3 text-md-on-surface-variant transition-all duration-200"
     >
       <div className="flex items-center gap-3.5 flex-1 min-w-0">
         <Search
@@ -213,15 +213,29 @@ export function Avatar({
 export function EmptyState({
   title,
   subtitle,
+  icon,
+  action,
 }: {
   title: string;
   subtitle?: string;
+  /** Optional illustration icon shown in a tonal circle above the title */
+  icon?: React.ReactNode;
+  /** Optional next-step buttons, so an empty screen always says what to do */
+  action?: React.ReactNode;
 }) {
   return (
-    <div className="py-12 px-4 text-center">
+    <div className="py-12 px-4 text-center flex flex-col items-center md-anim-fade">
+      {icon && (
+        <div className="w-14 h-14 rounded-full bg-md-secondary-container text-md-on-secondary-container flex items-center justify-center mb-4">
+          {icon}
+        </div>
+      )}
       <div className="text-base font-medium text-md-on-surface">{title}</div>
       {subtitle && (
-        <div className="text-sm text-md-on-surface-variant mt-1">{subtitle}</div>
+        <div className="text-sm text-md-on-surface-variant mt-1 max-w-sm">{subtitle}</div>
+      )}
+      {action && (
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">{action}</div>
       )}
     </div>
   );
@@ -241,9 +255,11 @@ export function Snackbar({
   return (
     <div
       role="status"
-      className="fixed bottom-6 left-6 z-50 h-12 px-4 rounded-xl bg-md-on-surface text-md-surface shadow-lg flex items-center gap-4 text-sm font-medium"
+      aria-live="polite"
+      key={message}
+      className="fixed z-[70] bottom-4 left-4 right-4 sm:right-auto sm:bottom-6 sm:left-6 sm:max-w-md min-h-12 py-2.5 pl-4 pr-2 rounded-xl bg-md-on-surface text-md-surface shadow-(--md-elevation-3) flex items-center justify-between gap-4 text-sm font-medium md-anim-snackbar"
     >
-      <span>{message}</span>
+      <span className="leading-5">{message}</span>
       <button
         type="button"
         onClick={onClose}
