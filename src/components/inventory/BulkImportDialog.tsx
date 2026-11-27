@@ -201,7 +201,12 @@ export function BulkImportDialog({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setServerError(data.error || "Import failed. Nothing was changed.");
+        setServerError(
+          data.error ||
+            (res.status >= 502 && res.status <= 504
+              ? "The server didn't answer in time. Close this and check the item list before importing again."
+              : `Import failed (error ${res.status}).`)
+        );
         setServerIssues(Array.isArray(data.errors) ? data.errors : []);
         return;
       }

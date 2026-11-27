@@ -207,11 +207,14 @@ export async function POST(request: Request) {
       },
       undefined,
       undefined,
-      { readBack: true }
+      { readBack: false }
     );
 
+    // Fresh committed view of just the purchasing data (goods receipts are a journal, so the
+    // transaction draft only holds the new ones).
     const { actor, ...rest } = result;
-    return NextResponse.json({ ...rest, ...buildView(db, actor) });
+    const view = await readTenantSlice(db.tenant.id, VIEW_FIELDS);
+    return NextResponse.json({ ...rest, ...buildView(view, actor) });
   } catch (err) {
     if (err instanceof PurchasingError) {
       return NextResponse.json({ error: err.message }, { status: err.status });

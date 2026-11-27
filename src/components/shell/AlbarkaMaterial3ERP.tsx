@@ -510,14 +510,33 @@ export function AlbarkaMaterial3ERP({
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(30_000),
       });
-      const data = await res.json();
+      // The server answered, so this is not an offline case: never queue it for replay (a
+      // gateway timeout page can arrive after the change was already committed).
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        return { ok: false, queued: false, error: data.error || "Sync failed" };
+        return {
+          ok: false,
+          queued: false,
+          error:
+            data.error ||
+            (res.status >= 502 && res.status <= 504
+              ? "The server didn't answer in time. Refresh to check whether the change was saved before trying again."
+              : `Save failed (error ${res.status}).`),
+        };
       }
       if (data.immutableAuditLogs) setImmutableAuditLogs(data.immutableAuditLogs);
       return { ok: true, queued: false, data };
-    } catch {
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "TimeoutError") {
+        return {
+          ok: false,
+          queued: false,
+          error:
+            "The server took too long to answer. Refresh to check whether the change was saved before trying again.",
+        };
+      }
       const entry: QueuedMutation = {
         id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         url: "/api/state",
@@ -531,7 +550,9 @@ export function AlbarkaMaterial3ERP({
   }
 
   async function fetchScopedState() {
-    const stateRes = await fetch("/api/state");
+    const stateRes = await fetch("/api/state", {
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!stateRes.ok) return;
     const data = await stateRes.json();
     if (data.tenant) setTenant(data.tenant);
@@ -707,11 +728,14 @@ export function AlbarkaMaterial3ERP({
     window.addEventListener("offline", handleOffline);
 
     async function initApp() {
+      // The session check alone decides what to show. Workspace data loads alongside it and
+      // fills in (the offline cache is already on screen), so a slow data load can never hold
+      // the app on the "verifying" screen.
+      const stateLoad = fetchScopedState().catch(() => undefined);
       try {
-        const [, authRes] = await Promise.all([
-          fetchScopedState(),
-          fetch("/api/auth"),
-        ]);
+        const authRes = await fetch("/api/auth", {
+          signal: AbortSignal.timeout(20_000),
+        });
         if (authRes.ok) {
           const authData = await authRes.json();
           setActiveSession(authData.activeSession || null);
@@ -730,10 +754,11 @@ export function AlbarkaMaterial3ERP({
           }
         }
       } catch {
-        // Offline cache already hydrated
+        // Offline or timed out: the cached workspace is already hydrated.
       } finally {
         setAuthChecking(false);
       }
+      await stateLoad;
     }
     initApp();
 

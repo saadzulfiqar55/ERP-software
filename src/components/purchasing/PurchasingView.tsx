@@ -143,13 +143,32 @@ function orderShareText(po: PurchaseOrder, businessName: string): string {
 }
 
 async function postAction(body: Record<string, unknown>) {
-  const res = await fetch("/api/purchasing", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch("/api/purchasing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    throw new Error(
+      err instanceof DOMException && err.name === "TimeoutError"
+        ? "The server took too long to answer. Refresh the page to check whether it was saved before trying again."
+        : "No connection. Check your internet and try again."
+    );
+  }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Something went wrong. Nothing was saved.");
+  if (!res.ok) {
+    // Only trust "nothing was saved" when the server said so; a gateway timeout (502/504) can
+    // arrive after the change was committed.
+    throw new Error(
+      data.error ||
+        (res.status === 502 || res.status === 503 || res.status === 504
+          ? "The server didn't answer in time. Refresh the page to check whether it was saved before trying again."
+          : `Something went wrong (error ${res.status}). Refresh the page to check before trying again.`)
+    );
+  }
   return data as PurchasingData & { message?: string; poId?: string; supplierId?: string };
 }
 
@@ -224,7 +243,7 @@ export function PurchasingView({
   const load = useCallback(async () => {
     setLoadError("");
     try {
-      const res = await fetch("/api/purchasing");
+      const res = await fetch("/api/purchasing", { signal: AbortSignal.timeout(30_000) });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || "Could not load purchasing.");
       apply(json as PurchasingData);

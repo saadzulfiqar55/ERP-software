@@ -108,6 +108,11 @@ function getPool(): Sql {
   const sql = postgres(uri, {
     prepare: false,
     max: 10,
+    // One query in flight per connection. Supabase's pooler in transaction mode (port 6543)
+    // never answers queries pipelined onto one client connection outside a transaction, so
+    // stacked queries hung until the function timed out. With this the driver waits for a free
+    // connection (or opens one, up to `max`) instead of stacking.
+    max_pipeline: 1,
     connect_timeout: 10,
     idle_timeout: 20,
     ssl: isLocal ? false : "require",
