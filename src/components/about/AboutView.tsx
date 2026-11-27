@@ -49,7 +49,7 @@ const STACK_TAGS = [
   "TypeScript 5",
   "Tailwind CSS v4",
   "Material Design 3",
-  "MongoDB Atlas",
+  "PostgreSQL (Supabase)",
   "HS256 JWT + scrypt",
   "PRA e-IMS & Khata",
 ];
