@@ -48,8 +48,13 @@ const STACK_TAGS = [
   "React 19",
   "TypeScript 5",
   "Tailwind CSS v4",
+<<<<<<< HEAD
   "Material 3 Expressive",
   "Supabase PostgreSQL + Drizzle",
+=======
+  "Material Design 3",
+  "PostgreSQL (Supabase)",
+>>>>>>> 1e26bce338b01e8c2f7d27d6386311ccba3c7733
   "HS256 JWT + scrypt",
   "PRA e-IMS & Khata",
 ];
