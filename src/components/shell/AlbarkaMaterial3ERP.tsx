@@ -5054,17 +5054,46 @@ export function AlbarkaMaterial3ERP({
                 </Card>
               )}
               {settingsSubTab === "APPEARANCE" && (
-                <Card className="space-y-5">
+                <Card className="space-y-6">
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>
-                      <h2 className="text-base font-semibold text-md-on-surface">
-                        Material 3 Theme & Appearance
+                      <h2 className="font-display text-lg font-bold text-md-on-surface">
+                        Material 3 Expressive · StackLyra Theme
                       </h2>
                       <p className="text-xs text-md-on-surface-variant mt-0.5">
-                        Switch between Light, Dark, or follow your OS color preference. Saved locally in your browser.
+                        Unified with stacklyra.com (Warm Ivory, Deep Navy &amp; Flame Orange). Switch between Light, Dark, or OS preference.
                       </p>
                     </div>
                     <ThemeSelector />
+                  </div>
+
+                  <div className="pt-4 border-t border-md-divider space-y-2.5">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-md-on-surface-variant">
+                      Active StackLyra Brand Palette
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+                      {[
+                        { name: "Flame Orange", hex: "#FF5B1F", bg: "bg-[#FF5B1F]", text: "text-white" },
+                        { name: "Deep Navy", hex: "#0E1B3D", bg: "bg-[#0E1B3D]", text: "text-[#FAF8F3]" },
+                        { name: "Warm Ivory", hex: "#FAF8F3", bg: "bg-[#FAF8F3]", text: "text-[#0E1B3D]" },
+                        { name: "Warm Sand", hex: "#F1EDE3", bg: "bg-[#F1EDE3]", text: "text-[#0E1B3D]" },
+                        { name: "Fresh Mint", hex: "#19C39A", bg: "bg-[#19C39A]", text: "text-[#064E3B]" },
+                        { name: "Warm Sun", hex: "#FFC83D", bg: "bg-[#FFC83D]", text: "text-[#4D3300]" },
+                        { name: "Soft Lilac", hex: "#B9A6FF", bg: "bg-[#B9A6FF]", text: "text-[#24135E]" },
+                      ].map((swatch) => (
+                        <div
+                          key={swatch.hex}
+                          className={`p-3 rounded-2xl border border-md-outline-variant/60 ${swatch.bg} ${swatch.text} flex flex-col justify-between min-h-[72px]`}
+                        >
+                          <span className="text-xs font-bold leading-tight">
+                            {swatch.name}
+                          </span>
+                          <span className="text-[11px] font-mono opacity-85">
+                            {swatch.hex}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </Card>
               )}

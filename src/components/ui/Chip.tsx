@@ -11,7 +11,7 @@ export type StatusChipVariant =
   | "error";
 
 /**
- * Reusable Material Design 3 StatusChip
+ * Material 3 Expressive StatusChip (Soft expressive pill badge)
  */
 export function StatusChip({
   label,
@@ -24,13 +24,13 @@ export function StatusChip({
     success: "bg-md-success-container text-md-on-success-container",
     primary: "bg-md-primary-container text-md-on-primary-container",
     warning: "bg-md-warning-container text-md-on-warning-container",
-    neutral: "bg-md-surface-variant text-md-on-surface-variant",
+    neutral: "bg-md-secondary-container text-md-on-secondary-container",
     error: "bg-md-error-container text-md-on-error-container",
   }[variant];
 
   return (
     <span
-      className={`border-0 inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium leading-none tracking-[0.01em] select-none ${styles}`}
+      className={`border-0 inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold leading-none tracking-[0.01em] select-none ${styles}`}
     >
       {label}
     </span>
@@ -61,7 +61,8 @@ export function mapInvoiceStatusToChipVariant(
 }
 
 /**
- * Reusable Material Design 3 FilterChip (Borderless tonal surface + subtle hover lift)
+ * Material 3 Expressive FilterChip
+ * Morphs shape between rounded-xl (unselected) and full pill (selected) for high-clarity scanning.
  */
 export function FilterChip({
   label,
@@ -79,28 +80,26 @@ export function FilterChip({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      className={`border-0 h-8 px-3.5 rounded-lg inline-flex items-center gap-1.5 text-xs font-medium tracking-[0.01em] transition-all duration-200 ease-out select-none ${
+      className={`border-0 h-9 px-4 inline-flex items-center gap-1.5 text-xs font-semibold tracking-[0.01em] select-none active:scale-[0.96] ${
         selected
-          ? "bg-md-secondary-container text-md-on-secondary-container shadow-[0_2px_6px_rgba(16,28,43,0.08)] hover:-translate-y-px"
-          : "bg-md-surface-container-low text-md-on-surface-variant hover:bg-md-surface-container-high hover:text-md-on-surface hover:-translate-y-px hover:scale-[1.015]"
+          ? "rounded-full bg-md-primary text-md-on-primary shadow-[0_4px_12px_rgba(255,91,31,0.28)] hover:bg-md-primary-strong hover:-translate-y-px"
+          : "rounded-xl bg-md-surface-container-low text-md-on-surface-variant hover:bg-md-surface-container-high hover:text-md-on-surface hover:-translate-y-px"
       }`}
     >
       {selected && (
-        <Check
-          className="w-3.5 h-3.5 shrink-0 text-md-primary"
-          strokeWidth={2.2}
-        />
+        <Check className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />
       )}
       <span>{label}</span>
       {count !== undefined && (
-        <span className="tabular-nums opacity-75">({count})</span>
+        <span className="tabular-nums opacity-80">({count})</span>
       )}
     </button>
   );
 }
 
 /**
- * Reusable Material Design 3 SegmentedButton (Borderless tonal pill track)
+ * Material 3 Expressive Connected Button Group / SegmentedButton
+ * Uses StackLyra Deep Navy / Warm Apricot active pill contrast.
  */
 export function SegmentedButton<T extends string>({
   options,
@@ -114,7 +113,7 @@ export function SegmentedButton<T extends string>({
   return (
     <div
       role="group"
-      className="border-0 inline-flex rounded-full p-1 bg-md-surface-container-low shadow-[inset_0_1px_2px_rgba(25,28,32,0.05)]"
+      className="border-0 inline-flex rounded-full p-1 bg-md-surface-container-low shadow-[inset_0_1px_2px_rgba(14,27,61,0.06)] gap-0.5"
     >
       {options.map((opt) => {
         const isSelected = opt.value === value;
@@ -124,14 +123,14 @@ export function SegmentedButton<T extends string>({
             type="button"
             onClick={() => onChange(opt.value)}
             aria-pressed={isSelected}
-            className={`border-0 h-9 px-4 rounded-full text-xs font-medium inline-flex items-center gap-1.5 transition-all duration-200 ease-out select-none ${
+            className={`border-0 h-9 px-4 rounded-full text-xs font-semibold inline-flex items-center gap-1.5 select-none active:scale-[0.97] ${
               isSelected
-                ? "bg-md-secondary-container text-md-on-secondary-container font-semibold shadow-[0_1px_4px_rgba(16,28,43,0.10)]"
-                : "text-md-on-surface-variant hover:text-md-on-surface hover:bg-md-surface-container-lowest/70"
+                ? "bg-md-on-surface text-md-surface shadow-[0_3px_10px_rgba(14,27,61,0.18)]"
+                : "text-md-on-surface-variant hover:text-md-on-surface hover:bg-md-surface-container-lowest/80"
             }`}
           >
             {isSelected ? (
-              <Check className="w-3.5 h-3.5 text-md-primary" strokeWidth={2.2} />
+              <Check className="w-3.5 h-3.5 text-md-primary" strokeWidth={2.6} />
             ) : (
               opt.icon ?? null
             )}

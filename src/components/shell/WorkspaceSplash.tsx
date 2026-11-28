@@ -8,9 +8,8 @@ export interface WorkspaceSplashProps {
 }
 
 /**
- * Shared pre-hydration and session-check splash screen rendered by both
- * `src/app/loading.tsx` (App Router Suspense fallback) and `AlbarkaMaterial3ERP`
- * while initial authentication state resolves.
+ * Shared Material 3 Expressive pre-hydration and session-check splash screen rendered by
+ * both `src/app/loading.tsx` and `AlbarkaMaterial3ERP`.
  */
 export function WorkspaceSplash({
   message = "Loading StackLyra ERP Workspace…",
@@ -19,13 +18,15 @@ export function WorkspaceSplash({
     <div
       role="status"
       aria-live="polite"
-      className="min-h-screen bg-md-surface flex flex-col items-center justify-center gap-4 px-6 text-md-on-surface"
+      className="min-h-screen m3-expressive-canvas flex flex-col items-center justify-center gap-5 px-6 text-md-on-surface"
     >
-      <StackLyraLogo size={56} className="drop-shadow-sm" />
-      <div className="text-center space-y-1">
-        <div className="text-lg font-semibold tracking-tight text-md-on-surface flex items-center justify-center gap-2">
+      <div className="p-2 rounded-[26px] bg-md-surface-container-lowest shadow-(--md-elevation-2) md-anim-rise">
+        <StackLyraLogo size={60} />
+      </div>
+      <div className="text-center space-y-1.5">
+        <div className="font-display text-2xl font-extrabold tracking-tight text-md-on-surface flex items-center justify-center gap-2.5">
           <span>StackLyra ERP</span>
-          <span className="px-2 py-0.5 rounded-full bg-md-primary-container text-md-on-primary-container text-[11px] font-mono font-semibold">
+          <span className="px-2.5 py-1 rounded-full bg-md-primary-container text-md-on-primary-container text-[11px] font-mono font-bold">
             {ERP_VERSION_TAG}
           </span>
         </div>
@@ -33,8 +34,8 @@ export function WorkspaceSplash({
           {message}
         </div>
       </div>
-      <div className="w-40 h-1 rounded-full bg-md-primary-container overflow-hidden">
-        <div className="w-1/2 h-full rounded-full bg-md-primary animate-pulse" />
+      <div className="w-48 h-2 rounded-full bg-md-surface-container-high overflow-hidden p-[1px]">
+        <div className="w-2/5 h-full rounded-full bg-md-primary md-expressive-indeterminate" />
       </div>
     </div>
   );

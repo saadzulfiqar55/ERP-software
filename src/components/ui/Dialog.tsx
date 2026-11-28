@@ -104,21 +104,21 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby="md-dialog-title"
         tabIndex={-1}
-        className={`w-full ${width} max-h-[92dvh] sm:max-h-[88vh] flex flex-col overflow-hidden bg-md-surface-container-lowest rounded-t-[28px] sm:rounded-[28px] shadow-(--md-elevation-3) outline-none md-anim-sheet`}
+        className={`w-full ${width} max-h-[92dvh] sm:max-h-[88vh] flex flex-col overflow-hidden bg-md-surface-container-lowest rounded-t-[32px] sm:rounded-[32px] shadow-(--md-elevation-3) outline-none md-anim-sheet`}
       >
         <div className="sm:hidden flex justify-center pt-3" aria-hidden>
-          <span className="w-8 h-1 rounded-full bg-md-outline-variant" />
+          <span className="w-10 h-1.5 rounded-full bg-md-outline-variant" />
         </div>
-        <div className="flex items-start gap-4 px-6 pt-5 pb-4">
+        <div className="flex items-start gap-4 px-6 pt-6 pb-4">
           {icon && (
-            <div className="w-10 h-10 rounded-full bg-md-primary-container text-md-on-primary-container flex items-center justify-center shrink-0">
+            <div className="w-11 h-11 rounded-[16px] bg-md-primary-container text-md-primary flex items-center justify-center shrink-0">
               {icon}
             </div>
           )}
           <div className="flex-1 min-w-0">
             <h2
               id="md-dialog-title"
-              className="text-xl leading-7 font-normal text-md-on-surface"
+              className="font-display text-xl leading-7 font-bold text-md-on-surface"
             >
               {title}
             </h2>

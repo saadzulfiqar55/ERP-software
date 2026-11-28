@@ -240,21 +240,21 @@ export default function AuthScreen({
       : selectedStaffUser?.role || "CASHIER";
 
   return (
-    <div className="min-h-screen bg-md-surface flex items-center justify-center p-4 sm:p-8">
-      <div className="max-w-5xl w-full bg-md-surface-container-lowest border-0 shadow-(--md-card-shadow) rounded-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12">
+    <div className="min-h-screen m3-expressive-canvas flex items-center justify-center p-4 sm:p-8">
+      <div className="max-w-5xl w-full bg-md-surface-container-lowest border-0 shadow-(--md-elevation-3) rounded-[32px] overflow-hidden grid grid-cols-1 lg:grid-cols-12 md-anim-rise">
         {/* Left 7 Cols: Brand, Workspace Selector & SaaS Tiers / Staff Profiles */}
         <div className="lg:col-span-7 p-6 sm:p-10 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-md-divider">
           <div>
             {/* Brand Row */}
             <div className="flex items-start justify-between gap-4 mb-6">
               <div className="flex items-center gap-4">
-                <StackLyraLogo size={48} className="shrink-0" />
+                <StackLyraLogo size={52} className="shrink-0 drop-shadow-xs" />
                 <div>
                   <div className="flex items-center gap-2.5 flex-wrap">
-                    <h1 className="text-[22px] leading-[28px] font-normal text-md-on-surface">
+                    <h1 className="font-display text-[26px] leading-[30px] font-extrabold text-md-on-surface tracking-tight">
                       StackLyra ERP
                     </h1>
-                    <StatusChip label="Multi-Tenant SaaS" variant="primary" />
+                    <StatusChip label="M3 Expressive · SaaS" variant="primary" />
                   </div>
                   <p className="text-sm text-md-on-surface-variant mt-0.5">
                     erp.stacklyra.com · HS256 JWT · Supabase PostgreSQL &amp; Drizzle
@@ -532,16 +532,16 @@ export default function AuthScreen({
             className="space-y-4 max-w-xs mx-auto w-full"
           >
             <div className="text-center">
-              <div className="w-12 h-12 rounded-2xl bg-md-primary-container text-md-on-primary-container flex items-center justify-center mx-auto mb-3">
+              <div className="w-13 h-13 rounded-[18px] bg-md-primary text-md-on-primary shadow-[0_6px_16px_rgba(255,91,31,0.32)] flex items-center justify-center mx-auto mb-3.5">
                 {authMode === "NEW_WORKSPACE" ? (
-                  <Building2 className="w-5 h-5" strokeWidth={1.8} />
+                  <Building2 className="w-5 h-5" strokeWidth={2} />
                 ) : authMode === "SUPER_ADMIN" ? (
-                  <Lock className="w-5 h-5" strokeWidth={1.8} />
+                  <Lock className="w-5 h-5" strokeWidth={2} />
                 ) : (
-                  <KeyRound className="w-5 h-5" strokeWidth={1.8} />
+                  <KeyRound className="w-5 h-5" strokeWidth={2} />
                 )}
               </div>
-              <h3 className="text-[22px] leading-[28px] font-normal text-md-on-surface">
+              <h3 className="font-display text-[24px] leading-[30px] font-bold text-md-on-surface">
                 {authMode === "NEW_WORKSPACE"
                   ? "Create SaaS Workspace"
                   : authMode === "SUPER_ADMIN"

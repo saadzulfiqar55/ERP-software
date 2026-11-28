@@ -48,8 +48,8 @@ const STACK_TAGS = [
   "React 19",
   "TypeScript 5",
   "Tailwind CSS v4",
-  "Material Design 3",
-  "MongoDB Atlas",
+  "Material 3 Expressive",
+  "Supabase PostgreSQL + Drizzle",
   "HS256 JWT + scrypt",
   "PRA e-IMS & Khata",
 ];
@@ -86,9 +86,9 @@ export default function AboutView() {
               </span>
             </div>
             <p className="text-sm text-md-on-surface-variant leading-relaxed">
-              Full-stack Material Design 3 Enterprise Resource Planning, POS Terminal,
+              Full-stack Material 3 Expressive Enterprise Resource Planning, POS Terminal,
               Invoicing, Integer-Paisa Double-Entry Khata Accounting, and Punjab Revenue
-              Authority (PRA e-IMS) compliance platform.
+              Authority (PRA e-IMS) compliance platform styled with the StackLyra brand palette.
             </p>
             <div className="flex flex-wrap gap-1.5 pt-1">
               {STACK_TAGS.map((tech) => (
