@@ -26,11 +26,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "StackLyra ERP — Material 3 Expressive Cloud ERP & POS",
   description:
-<<<<<<< HEAD
     "Multi-Tenant SaaS Cloud ERP, POS, Invoicing, Khata Accounting & Inventory powered by Material 3 Expressive, Next.js & Supabase PostgreSQL.",
-=======
-    "Google Material Design 3 (Material You) ERP, Invoicing, Khata Accounting, Inventory & PRA POS built with Next.js App Router, TypeScript & PostgreSQL.",
->>>>>>> 1e26bce338b01e8c2f7d27d6386311ccba3c7733
 };
 
 export default function RootLayout({
